@@ -5,9 +5,16 @@
 #include "testhooks.h"
 #include "netgame.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 int TestSyncOn = 0;
 int TestQuitTics = 0;
 int TestNudgeTic = -1;
+static int TestExitTic;         // -testexit<T>; 0 = off
+static int TestFireOn, TestFireFrom;
+static int TestLevelNo;         // the number of the level being played: 1 for the first, counted at its tic 1
 
 void TestSyncArg(void)         { TestSyncOn = 1; }
 void TestQuitArg(int tics)     { TestQuitTics = tics; }
@@ -18,7 +25,7 @@ void TestNudgeArg(int tic)     { TestNudgeTic = tic; }
 // here a mismatch ends the game with a message, and a different -testquit is harmless to the game.)
 int TestVersionSalt(void)
 {
-    return TestSyncOn ? 8 : 0;
+    return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0);
 }
 
 int TestSyncTic(int index)
@@ -333,7 +340,7 @@ static void TestStateTic(int tic)
             return;
         }
     }
-    fprintf(TestStateFile, "t%d randomseed=%d\n", tic, randomseed);
+    fprintf(TestStateFile, "t%d randomseed=%d level=%d\n", tic, randomseed, TestLevelNo);
     stlast_part = -1; stlast_obj = -2;
     WalkState(TextEmit);
     if (stlast_part >= 0) fputc('\n', TestStateFile);
@@ -393,11 +400,119 @@ static void TestDumpTic(int tic)
     fflush(TestDumpFile);
 }
 
+// ---- -testexit<T>, -teststall<T>,<ms>, -testfire[<N>] (A1: the level-exit test) ----------------------
+//
+// -testexit<T>: at game tic T of the first level every machine starts the countdown that a sector with
+// lotag -2 starts (player.c's processinput: timebeforeexit 2 becomes 1 in this tic, and then every
+// player's gm becomes MODE_EOL, the level number goes up: the writer at player.c:2516, which runs inside
+// the tic on every machine, at the same tic). Only player connecthead is given the countdown (every
+// player's would count the level up twice). The co-op bonus screen is skipped by the game itself
+// (dobonus returns at once for co-op), so a headless game goes on into the next level. In the version
+// byte (a machine without it would not leave the level).
+//
+// -teststall<T>,<ms>: at game tic T of the first level, after the exit if it is the same tic, this machine
+// stops for <ms> ms with its clock running, then goes on with the tic. The other machines go on making
+// their inputs meanwhile, so this one comes back with the inputs of more tics than the others in its
+// fifo, and its own are made in a burst. It is how a machine gets tics' inputs in its fifo at the exit
+// that the others never have (the tics moveloop() ran after MODE_EOL before the fix). In the browser it
+// yields (ASYNCIFY) so that network events are taken in; natively a busy wait (the datagrams wait in
+// the socket). Per machine: changes nothing in the simulation.
+//
+// -testfire[<N>]: from game tic N of the first level on (from its start without N) and in every later
+// level, this machine's own inputs select the pistol and hold the fire key (and walk about): the ammo changes every few
+// tics, and in co-op it is carried into the next level. The inputs go over the network as any other.
+
+static int TestExitDone;
+static int TestStallTic, TestStallMs, TestStallDone;
+
+void TestExitArg(int tic)  { TestExitTic = tic; }
+void TestFireArg(int tic)  { TestFireOn = 1; TestFireFrom = tic; }
+
+void TestStallArg(const char *arg)
+{
+    const char *c = strchr(arg, ',');
+
+    TestStallTic = atoi(arg);
+    TestStallMs = c ? atoi(c + 1) : 1000;
+}
+
+static void TestStall(void)
+{
+#ifndef __EMSCRIPTEN__
+    unsigned int t0;
+#endif
+
+    buildprintf("TEST: stalling for %d ms at tic %d\n", TestStallMs, movefifoplc + 1);
+#ifdef __EMSCRIPTEN__
+    emscripten_sleep(TestStallMs);
+#else
+    t0 = getticks();
+    while ((int)(getticks() - t0) < TestStallMs)
+        ;
+#endif
+    // the clock as a timer interrupt would have kept it: faketimerhandler() then makes the inputs that fell due
+    sampletimer();
+}
+
+void TestInputHook(void)
+{
+    int n;
+
+    // the input being made is fifo index movefifoend[myconnectindex], which game tic movefifoend + 1 of this level runs
+    if (!TestFireOn || (TestLevelNo <= 1 && movefifoend[myconnectindex] + 1 < TestFireFrom))
+        return;
+    loc.bits = (loc.bits & ~(15 << 8)) | (4 << 8) | (1 << 2);      // weapon 4 (the chaingun), fire
+    // and move about, in a pattern of the input's number, so that an input of another level or another
+    // moment is told from the right one by where the player goes
+    n = movefifoend[myconnectindex];
+    loc.fvel = (n & 7) * 120 + 200;
+    loc.svel = ((n >> 2) & 1) ? 300 : -300;
+    loc.avel = ((n >> 4) & 1) ? 6 : -4;
+}
+
+// The main loop found MODE_EOL: how many tics this machine played of the level, and how many more tics'
+// inputs it had from every player by then (what moveloop() would run after the exit without the fix).
+void TestLevelEnd(void)
+{
+    int i, more = MOVEFIFOSIZ;
+
+    if (TestExitTic <= 0 && TestStallTic <= 0)
+        return;
+    for (i = connecthead; i >= 0; i = connectpoint2[i])
+        if (movefifoend[i] - movefifoplc < more) more = movefifoend[i] - movefifoplc;
+    buildprintf("TEST: left the level after tic %d, with the inputs of %d more tics here (sent up to tic %d)\n",
+        movefifoplc, more, movefifosendplc);
+}
+
 // ---- The hooks in domovethings() ---------------------------------------------------------------
 
 void TestTicHook(void)
 {
     int tic = movefifoplc + 1;      // movefifoplc is advanced further on in domovethings()
+
+    if (tic == 1) TestLevelNo++;
+
+    // a game started with -v1 -l1 gives co-op players no weapons (newgame() only does for a deathmatch;
+    // a game started from the menu resets them with the new-game packet): give them the starting ones,
+    // so that -testfire has ammo to spend (every machine does it at the same point of the simulation)
+    if (TestFireOn && tic == 1 && TestLevelNo <= 1) {
+        int i;
+        for (i = connecthead; i >= 0; i = connectpoint2[i]) {
+            resetweapons(i);
+            ps[i].gotweapon[CHAINGUN_WEAPON] = 1;
+            ps[i].ammo_amount[CHAINGUN_WEAPON] = 300;
+        }
+    }
+
+    if (TestExitTic > 0 && !TestExitDone && TestLevelNo <= 1 && tic == TestExitTic) {
+        TestExitDone = 1;
+        ps[connecthead].timebeforeexit = 2;
+        buildprintf("TEST: ending the level at tic %d (level %d)\n", tic, ud.level_number);
+    }
+    if (TestStallTic > 0 && !TestStallDone && TestLevelNo <= 1 && tic == TestStallTic) {
+        TestStallDone = 1;
+        TestStall();
+    }
 
     if (TestNudgeTic >= 0 && tic == TestNudgeTic) {
         buildprintf("TEST: nudging player %d at tic %d\n", myconnectindex, TestNudgeTic);
@@ -419,11 +534,14 @@ static void TestQuitFinish(void)
     if (TestDumpFile) fflush(TestDumpFile);
 
     // a player that is a few tics behind still needs what we send: keep acknowledging and
-    // resending for a moment before leaving
+    // resending for a moment before leaving, and (the master) send the slaves the tics it has played
+    // and not yet forwarded (the last tic is played before it is forwarded when a slave is slow)
     if (numplayers > 1) {
         until = getticks() + 1500;
         while (getticks() < until) {
             handleevents();
+            getpackets();
+            if (networkmode == 0 && myconnectindex == connecthead) sendmasterpackets(movefifoplc);
             flushpackets();
         }
     }
@@ -432,6 +550,13 @@ static void TestQuitFinish(void)
 
 void TestTicEnd(void)
 {
+    static int reported;
+
+    // (a tic that ended the level: the same line on every machine, for the tests)
+    if ((TestExitTic > 0 || TestStallTic > 0) && !reported && (ps[myconnectindex].gm & MODE_EOL)) {
+        reported = 1;
+        buildprintf("TEST: the level ended in tic %d, next level %d\n", movefifoplc, ud.level_number);
+    }
     if (TestQuitTics > 0 && movefifoplc >= TestQuitTics)
         TestQuitFinish();
 }

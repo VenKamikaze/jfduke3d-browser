@@ -799,6 +799,7 @@ void faketimerhandler()
             if (movefifoend[i] < movefifoend[myconnectindex]-200) return;
 
      getinput(myconnectindex);
+     TestInputHook();   // test-only: -testfire
 
      avgfvel += loc.fvel;
      avgsvel += loc.svel;
@@ -7031,6 +7032,15 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"teststate",9)) {
                     TestStateArg(atoi(c+9));    // test-only: with -testdump, the state as text
                 }
+                else if (!Bstrncasecmp(c,"testexit",8)) {
+                    TestExitArg(atoi(c+8));     // test-only: every machine ends the first level at tic T
+                }
+                else if (!Bstrncasecmp(c,"teststall",9)) {
+                    TestStallArg(c+9);          // test-only: this machine stops for a while at tic T of the first level
+                }
+                else if (!Bstrncasecmp(c,"testfire",8)) {
+                    TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
+                }
                 else if (!Bstrcasecmp(c,"name")) {
                     if (argc > i+1) {
                         CommandName = argv[i+1];
@@ -8139,6 +8149,7 @@ if (VOLUMEONE) {
         {
             if( ps[myconnectindex].gm&MODE_EOL )
             {
+                TestLevelEnd();     // test-only: -testexit, -teststall
                 closedemowrite();
 
                 // The master sends the slaves the inputs of the tics when it has them, which can be after

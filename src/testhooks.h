@@ -16,7 +16,19 @@
 //   -testdump<name>    this machine writes a record of every game tic to the file <name>, in every
 //                      kind of game (network, single player, demo playback), see testhooks.c.
 //   -teststate[<T>]    with -testdump: also <name>.state, the state as text at tics 1, 2 and T.
-// Everything is off without its argument, and nothing here goes on the wire except -testsync.
+//   -testexit<T>       (A1) at game tic T of the first level the level ends, the way a level-end sector
+//                      ends it (the CON/sector "timebeforeexit" countdown that player.c's processinput
+//                      runs: MODE_EOL for every player and the next level number, inside the tic, the
+//                      same tic on every machine). Every player must be given it (version byte).
+//   -teststall<T>,<ms> (A1) this machine stops for <ms> ms at the start of game tic T of the first
+//                      level (after -testexit's tic if it is the same), its clock running: the other
+//                      machines go on, and it comes back with the inputs of many more tics in its
+//                      fifo. Per machine; changes nothing in the simulation.
+//   -testfire[<N>]     (A1) from game tic N of the first level on (from the start without N) and in
+//                      every later level, this machine's own inputs select the chaingun and hold fire
+//                      (the inputs travel as any other), so the ammo count changes every few tics.
+// Everything is off without its argument, and nothing here goes on the wire except -testsync
+// and -testexit (the version byte of packet 6).
 
 #ifndef TESTHOOKS_H_
 #define TESTHOOKS_H_
@@ -33,7 +45,17 @@ void TestSyncArg(void);
 void TestQuitArg(int tics);
 void TestNudgeArg(int tic);
 void TestDumpArg(const char *name);
+void TestExitArg(int tic);
+void TestStallArg(const char *arg);
+void TestFireArg(int tic);
 void TestStateArg(int tic);     // -teststate[<T>]: with -testdump, also <name>.state, the state as text (tics 1, 2 and T)
+
+// Called from faketimerhandler() right after the local input is made (-testfire).
+void TestInputHook(void);
+
+// Called from the main loop when it finds MODE_EOL (-testexit, -teststall): "TEST: left the level
+// after tic T, with the inputs of K more tics here".
+void TestLevelEnd(void);
 
 // Added to the version byte of packet 6 (0 without -testsync).
 int TestVersionSalt(void);
