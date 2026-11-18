@@ -273,8 +273,10 @@ test-mmulti: engine-current
 # -testdump the same; a deliberate desync is caught; -testdump in single player and demo playback;
 # plain UDP against the old build; errors; a lost relay session; the shareware network gate;
 # every machine holds every player's announced settings (test-player-announce.sh, D1); every machine plays the
-# same tics of a level and all leave it (test-level-exit.sh, D5 and D6); F4 opens the sound menu and Escape leaves it (test-menu-f4.sh, D3); the prediction never changes the
-# simulation (test-predict-pure.sh); a player without sound plays the same game (--nosound)
+# same tics of a level and all leave it (test-level-exit.sh, D5 and D6); F4 opens the sound menu and Escape
+# leaves it (test-menu-f4.sh, D3: needs Xvfb, xdotool, ImageMagick and PIL; exit 3 is "NOT RUN", reported
+# and not counted as a failure); the prediction never changes the simulation (test-predict-pure.sh); a
+# player without sound plays the same game (--nosound)
 test-net: engine-current
 	for i in $$(seq $(GAME_RUNS)); do tests/net/test-three-games.sh --relay || exit 1; done
 	tests/net/test-three-games.sh --relay --players 2
@@ -287,7 +289,7 @@ test-net: engine-current
 	tests/net/test-level-exit.sh
 	tests/net/test-predict-pure.sh
 	tests/net/test-single.sh
-	tests/net/test-menu-f4.sh
+	@tests/net/test-menu-f4.sh; st=$$?; if [ $$st -eq 3 ]; then echo '*** test-menu-f4.sh: NOT RUN (not counted as passed; see its message above)'; elif [ $$st -ne 0 ]; then exit $$st; fi
 	tests/net/test-udp-unchanged.sh --base-game "$$(tests/net/build-baseline.sh)"
 	tests/net/test-errors.sh
 	tests/net/test-relay-lost.sh

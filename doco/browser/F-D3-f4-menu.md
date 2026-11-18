@@ -47,7 +47,7 @@ Found in brief 02 (browser) and confirmed natively at the merge of brief 01 (`bu
 ## Tests
 
 - **`tests/web/menu-keys.js`** (Chromium, port 49107, about 30 s; in `make test-web`). `-testmenu` makes the game print `TEST: menu N` whenever the menu of a game opens, changes or closes (`TestMenuPoll()`, from `displayrest()`; inert without the argument). Two rounds of F4 then Escape, each checking: the game reports 701; the sound menu is on the picture (red pixels where its names are: about 8,300, none on the level); frames keep coming; Escape gives -1; the text is gone; holding Up changes tens of thousands of pixels again. Then Enter on the Sound line changes ON to OFF in the picture (the menu takes keys). Then the Options path (Escape, O, Enter, S, Enter) reaches 700 and Escape goes 200, 50, none, and the player can move at the end.
-- **`tests/net/test-menu-f4.sh`** (the native build on Xvfb, real keys from `xdotool`, screenshots from `import`, about 40 s; in `make test-net`): the same, two rounds. It says SKIP and passes when Xvfb, xdotool, ImageMagick or PIL is missing.
+- **`tests/net/test-menu-f4.sh`** (the native build on Xvfb, real keys from `xdotool`, screenshots from `import`, about 40 s; in `make test-net`): the same, two rounds. It prints NOT RUN and exits 3 when Xvfb, xdotool, ImageMagick or PIL is missing; `make test-net` reports that and goes on (it is neither a failure nor a pass).
 - Mutation: see the Outcome.
 
 ## Dependencies
@@ -90,3 +90,5 @@ Status: **review** (branch `browser/F-D3-f4-menu`; the coordinator marks it done
 - The page's short test notes in `02-emscripten-port.md` ("F4 in a game freezes the game ... don't use it") are out of date once this is merged; the coordinator can drop that line.
 - The browser build was not tried in Firefox (no change that depends on the browser).
 - Not verified: what the DOS original did on Escape from F4's menu (not known here; Escape returning to the game is what F2, F3, F6 and the game menu do).
+
+**Fix round (review).** `test-menu-f4.sh` prints `NOT RUN` and exits 3 when a tool is missing (checked with `xdotool` off the `PATH`: exit 3), and `make test-net` prints `*** test-menu-f4.sh: NOT RUN` and goes on, neither failing nor counting it as passed. Its display comes from `Xvfb -displayfd` (no fixed number). `02-emscripten-port.md` and `bugs.md` (`game.c:6730`) corrected. Note: `make test-web` runs `determinism.js` directly, so its exit 3 (clang missing) still fails that target; not changed here.

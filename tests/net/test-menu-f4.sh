@@ -12,8 +12,9 @@
 # Before the fix F4 left the game in a menu that was never drawn and that Escape did not close: the
 # red pixels did not appear and Up changed nothing afterwards. About 40 s.
 #
-# Needs Xvfb, xdotool, ImageMagick's import and Python 3 with PIL; without them the test says so and
-# passes (the browser test, tests/web/menu-keys.js, is the main one).
+# Needs Xvfb, xdotool, ImageMagick's import and Python 3 with PIL; without them it prints NOT RUN and
+# exits 3 (the convention of tests/web/determinism.js and firefox.js; the Makefile reports it and goes on).
+# The browser test, tests/web/menu-keys.js, is the main one.
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -25,9 +26,9 @@ while [ $# -gt 0 ]; do
     esac
 done
 for tool in Xvfb xdotool import; do
-    command -v "$tool" >/dev/null || { echo "SKIP: $tool is not installed"; exit 0; }
+    command -v "$tool" >/dev/null || { echo "menu-f4: NOT RUN: $tool is not installed"; exit 3; }
 done
-python3 -c 'import PIL' 2>/dev/null || { echo "SKIP: Python PIL is not installed"; exit 0; }
+python3 -c 'import PIL' 2>/dev/null || { echo "menu-f4: NOT RUN: Python PIL is not installed"; exit 3; }
 t_need_data
 
 wd="$t_tmp/game"
@@ -37,10 +38,12 @@ mkdir -p "$wd" "$shots"
 "$root/scripts/run-headless.sh" --game "$game" --workdir "$wd" --timeout 4 -nosetup >/dev/null 2>&1
 rm -f "$wd/duke3d.log"
 
-display=":$((90 + $$ % 100))"
-Xvfb "$display" -screen 0 800x600x24 -nolisten tcp >"$t_tmp/xvfb.log" 2>&1 &
+# Xvfb picks a free display number itself and reports it on a pipe (-displayfd).
+Xvfb -displayfd 3 -screen 0 800x600x24 -nolisten tcp 3>"$t_tmp/display" >"$t_tmp/xvfb.log" 2>&1 &
 t_pids+=("$!")
-for i in $(seq 1 50); do xdpyinfo -display "$display" >/dev/null 2>&1 && break; DISPLAY=$display xdotool getdisplaygeometry >/dev/null 2>&1 && break; sleep 0.2; done
+for i in $(seq 1 100); do [ -s "$t_tmp/display" ] && break; sleep 0.1; done
+[ -s "$t_tmp/display" ] || { echo "Xvfb did not report a display:"; cat "$t_tmp/xvfb.log"; exit 125; }
+display=":$(head -1 "$t_tmp/display")"
 
 (
     cd "$wd" && exec env DISPLAY="$display" HOME="$wd" SDL_AUDIODRIVER=dummy "$game" -nosetup -v1 -l1 -s1 -testmenu

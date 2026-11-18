@@ -251,7 +251,7 @@ tests/net/test-player-announce.sh [--game FILE] [--only relay-3|relay-4|udp-3]  
 tests/net/test-level-exit.sh [--game FILE] [--runs N] [--only NAME]   # D5, D6: the level ends at tic 200 with a machine stopped for 1.5 s: every machine plays 200 tics, all leave, dumps and states equal (relay-slave, relay-master, relay-3, udp-slave, udp-master, udp-3)
 tests/net/test-predict-pure.sh [--game FILE]                  # A1: -testpredict on every machine: the prediction never changes the simulation
 tests/net/test-single.sh [--game FILE] [--tics N]             # -testquit and -testdump in single player and demo playback
-tests/net/test-menu-f4.sh [--game FILE]                       # D3: native game on Xvfb with xdotool: F4 opens the sound menu, Escape gets the player back (skips itself without Xvfb, xdotool, ImageMagick or PIL)
+tests/net/test-menu-f4.sh [--game FILE]                       # D3: native game on Xvfb with xdotool: F4 opens the sound menu, Escape gets the player back (prints NOT RUN and exits 3 without Xvfb, xdotool, ImageMagick or PIL)
 tests/net/test-udp-unchanged.sh --base-game "$(tests/net/build-baseline.sh)" [--mutate-wire]   # plain -net against the pre-brief build
 tests/net/test-errors.sh [--only REGEX] [--game FILE]         # bad code, full room, relay down, host leaves, caps
 tests/net/test-relay-lost.sh [--game FILE]                    # a relay session lost during a game
