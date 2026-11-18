@@ -26,6 +26,7 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 //-------------------------------------------------------------------------
 
 #include "duke3d.h"
+#include "netgame.h"
 
 extern unsigned char pow2char[];
 
@@ -1304,6 +1305,7 @@ void waitforeverybody()
 
         if (quitevent || keystatus[1]) gameexit("");
 
+        NetLostCheck();     // a relay session lost while waiting ends the game (L18)
         getpackets();
 
         for(i=connecthead;i>=0;i=connectpoint2[i])

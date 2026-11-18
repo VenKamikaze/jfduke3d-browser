@@ -51,6 +51,7 @@ extern int32 ScreenWidth;
 extern int32 ScreenHeight;
 extern int32 ScreenBPP;
 extern int32 ForceSetup;
+extern int32 AllowSharewareNet;     // [Comm Setup] AllowSharewareNetGames (netgame.h, D14)
 
 extern byte KeyboardKeys[NUMGAMEFUNCTIONS][2];
 extern int32 MouseFunctions[MAXMOUSEBUTTONS][2];
