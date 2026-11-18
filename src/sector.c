@@ -1944,6 +1944,7 @@ char checkhitceiling(short sn)
 void checkhitsprite(short i,short sn)
 {
     short j, k, p;
+    int r0, r1, r2, r3, r4;
     spritetype *s;
 
     i &= (MAXSPRITES-1);
@@ -2014,7 +2015,12 @@ void checkhitsprite(short i,short sn)
                 case HEAVYHBOMB:
                     for(k=0;k<64;k++)
                     {
-                        j = EGS(SECT,SX,SY,SZ-(TRAND%(48<<8)),SCRAP3+(TRAND&3),-8,48,48,TRAND&2047,(TRAND&63)+64,-(TRAND&4095)-(sprite[i].zvel>>2),i,5);
+                        r4 = TRAND&4095;
+                        r3 = TRAND&63;
+                        r2 = TRAND&2047;
+                        r1 = TRAND&3;
+                        r0 = TRAND%(48<<8);
+                        j = EGS(SECT,SX,SY,SZ-r0,SCRAP3+r1,-8,48,48,r2,r3+64,-r4-(sprite[i].zvel>>2),i,5);
                         sprite[j].pal = 8;
                     }
 
@@ -2029,7 +2035,13 @@ void checkhitsprite(short i,short sn)
         case HANGLIGHT:
         case GENERICPOLE2:
             for(k=0;k<6;k++)
-                EGS(SECT,SX,SY,SZ-(8<<8),SCRAP1+(TRAND&15),-8,48,48,TRAND&2047,(TRAND&63)+64,-(TRAND&4095)-(sprite[i].zvel>>2),i,5);
+            {
+                r3 = TRAND&4095;
+                r2 = TRAND&63;
+                r1 = TRAND&2047;
+                r0 = TRAND&15;
+                EGS(SECT,SX,SY,SZ-(8<<8),SCRAP1+r0,-8,48,48,r1,r2+64,-r3-(sprite[i].zvel>>2),i,5);
+            }
             spritesound(GLASS_HEAVYBREAK,i);
             deletesprite(i);
             break;
@@ -2060,8 +2072,14 @@ void checkhitsprite(short i,short sn)
             if(sprite[sn].extra != *actorscrptr[SHOTSPARK1] )
             {
                 for(j=0;j<15;j++)
-                    EGS(SECT,SX,SY,sector[SECT].floorz-(12<<8)-(j<<9),SCRAP1+(TRAND&15),-8,64,64,
-                        TRAND&2047,(TRAND&127)+64,-(TRAND&511)-256,i,5);
+                {
+                    r3 = TRAND&511;
+                    r2 = TRAND&127;
+                    r1 = TRAND&2047;
+                    r0 = TRAND&15;
+                    EGS(SECT,SX,SY,sector[SECT].floorz-(12<<8)-(j<<9),SCRAP1+r0,-8,64,64,
+                        r1,r2+64,-r3-256,i,5);
+                }
                 spawn(i,EXPLOSION2);
                 deletesprite(i);
             }
