@@ -8,8 +8,11 @@ You are the **coordinator** for a multi-brief project in [`VenKamikaze/jfduke3d-
 
 ## 0. Where things stand (hand-off; keep this up to date after every merge)
 
-**18 Nov 2026: brief 00 landed on `browser/00-setup` (review: not merged yet). Nothing else is written or started.**
+**18 Nov 2026: briefs 00 and 01 have landed on `claude`; brief 02 is merged into `browser/02-emscripten-port` with `claude` (`cab7a05`) and waits for the coordinator's check ("merged (coordinator check pending)"). Next: F-D1, then A1, then 03.**
 
+- **Landed since 00 (read `01-native-relay.md` and `02-emscripten-port.md`, Outcomes):**
+  - **01:** native relay games and plain UDP, test hooks (`-testquit`, `-testsync`, `-testnudge`, `-testdump`), `make test`, `test-net`. **`-testdump`** is 32 bytes per tic: eight little endian words (tic, random seed, six FNV-1a hashes: players, sprites, hittype, sectors, walls, other), state before the tic (`code-facts.md` 15.2). **The shareware network gate (D14):** off by default; `AllowSharewareNetGames = 1` under `[Comm Setup]` in `duke3d.cfg` or `-allowsharewarenet` turns it on; `NetGameAllowed()` decides on the data actually mounted. **D1 is confirmed** (packet 6 is re-sent to the wrong slaves with 3 or more players) and needs a fix brief **F-D1 before A1**. **L18 (a vanished host is not noticed) is shared with jfSW** and stays a documented limitation.
+  - **02:** `scripts/build-wasm.sh` builds `build-wasm/`; `make test-web` runs `smoke`, `persist`, `focus`, `loops`, `frametime` (the last fails here on 100 ms stalls: software-rendered Chromium). **No Duke loop needed a yield** (the engine's `handleevents()` and `nextpage()` already yield). The page (`web/jfduke3d.js`) is jfSW's 02c page with the same `Module.jfsw*` / `window.jfsw*` names; the data download (03), lobby (05) and notice (05b) are left out. Duke's own bugs: **D3** F4 freezes the game in an undrawn menu (native too), **D4** menu hotkeys move the cursor only. Only game change: `menus()` writes `duke3d.cfg` when the menu closes. The browser links the real vnet-backed `mmulti.c`; no `-DJFBUILD_NO_VNET` switch (decision). **The native-against-wasm determinism test is deferred into brief 03** (it needs 01's `-testdump`). **jfSW's `warpScript()` does not speed up the game** (SDL reads `Date.now`, not `performance.now`): jfSW's test helper could take the same fix.
 - **Answers** are recorded in [`README.md`](README.md): submodules on the user's forks; shareware data from a verified mirror; "Start now" is in; music later; upstream-friendly where cheap; the browser offers the shareware GRP plus the file picker only; **CON scripts come from the GRP only** in the browser (a loose CON is test-only, like jfSW's `?files=`) and the CON hash goes into brief 05b's identity; the page files are `jfduke3d.js` and `jfduke3d.css`.
 - **Repos:** `VenKamikaze/jfduke3d-browser` (this one; `claude` = upstream `master` `55c5f95`) and the shared forks `VenKamikaze/jfbuild` (`claude`, pinned at `5950d14`), `VenKamikaze/jfaudiolib` (`claude`, `ff1b31d`), `VenKamikaze/jfmact` (`master`, `731c0cc`; it has no `claude`, see the README), plus vnet at `ext/vnet` (`v0.5.0`, `8572c74`).
 - **Multi-repo git rules** are in the README ("Working across repos"). The forks are **shared with jfSW**: run both games' `make test` before moving a fork's `claude`, and put a Duke-only engine change behind a run-time switch or in the game.
@@ -31,7 +34,7 @@ You are the **coordinator** for a multi-brief project in [`VenKamikaze/jfduke3d-
 ## 1. Set up
 
 1. **The `claude` branch exists** (`55c5f95`, upstream `master`). All work branches from it. Never commit directly to `claude` or `master`.
-2. **Run the briefs in order** (§5). Brief 00 is done and waits for review and merge.
+2. **Run the briefs in order** (§5). Briefs 00 and 01 are done; 02 waits for the coordinator's check.
 3. **Network check:** confirm that github.com, proxy.golang.org (for the relay), the emsdk download hosts and `image.dosgamesarchive.com`/`archive.org` are reachable from the session. If a host is blocked, tell the user which one; don't work around it (the GitHub archive URLs are the known exception: `emscripten-ports`).
 
 ## 2. What the code does
@@ -40,7 +43,7 @@ Verified in brief 00: see [`code-facts.md`](code-facts.md), with file:line for e
 
 ## 3. Settled decisions
 
-Don't reopen these inside a brief. If one proves wrong, stop and ask the user. (The same list, with D13, is in [`README.md`](README.md).)
+Don't reopen these inside a brief. If one proves wrong, stop and ask the user. (The same list, with D13 and D14, is in [`README.md`](README.md).)
 
 - **D1. The browser is the end goal.** The native Linux build must keep working, and native players must be able to join browser rooms.
 - **D2. No joining mid-game.** The player count is fixed when the game starts.
@@ -55,6 +58,7 @@ Don't reopen these inside a brief. If one proves wrong, stop and ask the user. (
 - **D11. Licensing:** only the shareware GRP may be offered for public download by default.
 - **D12. Toolchain:** Emscripten 6.0.13.
 - **D13. File names:** `jfduke3d.js`, `jfduke3d.css`, jfSW's `web/` structure.
+- **D14. Shareware network gate:** with the shareware GRP, network games (plain UDP and relay) are refused by default, with a message, unless `[Comm Setup] AllowSharewareNetGames = 1` in `duke3d.cfg` or `-allowsharewarenet` allows them; registered data always allows them. Reason: the shareware licence's `[3][D]` (online multiplayer services need 3D Realms' written permission), so shareware netplay is for LANs only. Tests on shareware data turn the option on. Every entry point asks `NetGameAllowed()`.
 - **The forks are shared with jfSW** (README, "Working across repos").
 - **Relay games are master/slave** (D5): Duke's M/S code is the `!networkmode` paths of `game.c` (`code-facts.md` §3.1).
 

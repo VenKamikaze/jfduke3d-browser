@@ -7,6 +7,8 @@
 #
 #   --grp FILE      the GRP to use (default testdata/duke3dshare.grp; see
 #                   scripts/fetch-test-data.sh)
+#                   --grp none puts no GRP in the work directory (for tests that bring
+#                   their own, e.g. through -g)
 #   --timeout SEC   stop the game after SEC seconds (default 30). jfDuke3D never
 #                   ends by itself (a demo that ends starts the next one, or
 #                   the menu), so a run that ends this way is not a failure of
@@ -77,7 +79,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ -x "$game" ] || { echo "run-headless: $game not found: run make first" >&2; exit 125; }
-[ -f "$grp" ] || { echo "run-headless: $grp not found: run scripts/fetch-test-data.sh" >&2; exit 125; }
+[ "$grp" = none ] || [ -f "$grp" ] || { echo "run-headless: $grp not found: run scripts/fetch-test-data.sh" >&2; exit 125; }
 case "$secs" in ''|*[!0-9]*) echo "run-headless: --timeout must be whole seconds" >&2; exit 2 ;; esac
 
 created=""
@@ -95,7 +97,7 @@ else
 fi
 workdir="$(cd "$workdir" && pwd)" || exit 125
 game="$(cd "$(dirname "$game")" && pwd)/$(basename "$game")"
-grp="$(cd "$(dirname "$grp")" && pwd)/$(basename "$grp")"
+[ "$grp" = none ] || grp="$(cd "$(dirname "$grp")" && pwd)/$(basename "$grp")"
 
 : > "$workdir/user_profiles_disabled"
 if [ "$music" = 0 ]; then
@@ -108,7 +110,7 @@ if [ "$music" = 0 ]; then
         printf '\n[Sound Setup]\nMusicDevice = 1\n' >> "$cfg" || exit 125
     fi
 fi
-ln -sf "$grp" "$workdir/$(basename "$grp")"
+[ "$grp" = none ] || ln -sf "$grp" "$workdir/$(basename "$grp")"
 
 cd "$workdir" || exit 125
 unset WAYLAND_DISPLAY

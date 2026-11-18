@@ -78,6 +78,8 @@ GAMEOBJS=$(SRC)\game.$o \
 	$(SRC)\osdfuncs.$o \
 	$(SRC)\osdcmds.$o \
 	$(SRC)\grpscan.$o \
+	$(SRC)\netgame.$o \
+	$(SRC)\testhooks.$o \
 	$(SRC)\gameres.$(res) \
 	$(SRC)\startwin_game.$o
 

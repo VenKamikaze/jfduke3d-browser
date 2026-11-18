@@ -90,7 +90,9 @@ GAMEOBJS=$(SRC)/game.$o \
 	$(SRC)/osdfuncs.$o \
 	$(SRC)/osdcmds.$o \
 	$(SRC)/grpscan.$o \
-	$(SRC)/sounds.$o
+	$(SRC)/sounds.$o \
+	$(SRC)/netgame.$o \
+	$(SRC)/testhooks.$o
 
 GAMEOBJS+= \
 	$(MACTROOT)/util_lib.$o \
@@ -238,12 +240,43 @@ $(SRC)/version-auto.c:
 	echo "const char *game_date = __DATE__;" >> $@
 	echo "const char *game_time = __TIME__;" >> $@
 
-# TESTS (brief 00: the tests of the scripts. Brief 01 adds the network tests; see
-# doco/browser/building.md.) tests/fetch-test-data.sh downloads the two shareware zips
-# unless JFDUKE3D_TEST_ZIP and JFDUKE3D_TEST_ZIP2 name local copies.
-.PHONY: test test-scripts
+# TESTS. Brief 00: the tests of the scripts (tests/fetch-test-data.sh downloads the two shareware
+# zips unless JFDUKE3D_TEST_ZIP and JFDUKE3D_TEST_ZIP2 name local copies). Brief 01: the network
+# tests; see doco/browser/building.md. The top-level rule above never re-makes an existing
+# jfbuild/libengine.a, so the network tests bring the engine library up to date first.
+.PHONY: test test-scripts test-mmulti test-net engine-current
+MMULTI_RUNS ?= 10
+GAME_RUNS ?= 1
 test-scripts:
 	tests/fetch-test-data.sh
 	tests/run-headless.sh
 
-test: test-scripts
+engine-current: duke3d$(EXESUFFIX)
+	$(MAKE) -C $(ENGINEROOT) -f Makefile \
+		USE_POLYMOST=$(USE_POLYMOST) \
+		USE_OPENGL=$(USE_OPENGL) \
+		USE_ASM=$(USE_ASM) \
+		RELEASE=$(RELEASE) $(ENGINELIB)
+	$(MAKE) duke3d$(EXESUFFIX)
+
+# mmulti over vnet with loss, duplication and reordering (no game data needed)
+test-mmulti: engine-current
+	tests/net/test-mmulti-vnet.sh --runs $(MMULTI_RUNS)
+
+# game processes through a relay (2, 3 and 4 players, with impairment) and over plain UDP, each machine's
+# -testdump the same; a deliberate desync is caught; -testdump in single player and demo playback;
+# plain UDP against the old build; errors; a lost relay session; the shareware network gate
+test-net: engine-current
+	for i in $$(seq $(GAME_RUNS)); do tests/net/test-three-games.sh --relay || exit 1; done
+	tests/net/test-three-games.sh --relay --players 2
+	tests/net/test-three-games.sh --relay --players 4
+	tests/net/test-three-games.sh --relay --impair "loss=3,dup=2,reorder=3,lat=10,jit=5" --tics 600
+	tests/net/test-three-games.sh --udp
+	tests/net/test-desync.sh
+	tests/net/test-single.sh
+	tests/net/test-udp-unchanged.sh --base-game "$$(tests/net/build-baseline.sh)"
+	tests/net/test-errors.sh
+	tests/net/test-relay-lost.sh
+	tests/net/test-shareware-gate.sh
+
+test: test-scripts test-mmulti test-net

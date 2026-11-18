@@ -16,11 +16,12 @@ Each brief (`NN-*.md`) is one unit of work, sized for a single implement → rev
 
 | # | Brief | Repos touched | Depends on | Status |
 |---|---|---|---|---|
-| 00 | [Set-up, baseline, code facts](00-setup.md) | jfduke3d-browser | — | review |
-| 01 | Native relay games, test hooks (`-testquit`, `-testsync`, `-testnudge`, `-testdump` per-tic state hash), `make test-net` | jfduke3d-browser | 00 | not written |
-| 02 | Emscripten port: wasm build, page, IDBFS, yields in Duke's loops, browser tests | jfduke3d-browser, jfbuild, jfaudiolib | 00 (alongside 01) | not written |
+| 00 | [Set-up, baseline, code facts](00-setup.md) | jfduke3d-browser | — | landed |
+| 01 | [Native relay games](01-native-relay.md), test hooks (`-testquit`, `-testsync`, `-testnudge`, `-testdump` per-tic state hash), `make test-net` | jfduke3d-browser | 00 | landed (merged `cab7a05`) |
+| 02 | [Emscripten port](02-emscripten-port.md): wasm build, page, IDBFS, browser tests (no Duke loop needed a yield) | jfduke3d-browser | 00 (alongside 01) | merged (coordinator check pending) |
+| F-D1 | Fix for 01's D1 (packet 6 re-sent to the wrong slaves in master/slave mode with 3 or more players; confirmed by review; game-breaking) | jfduke3d-browser | 01 | not written, **before A1** |
 | A1 | Determinism audit (sound-gated random, local-player state in simulation, CON VM, prediction purity, aim mode) and a level-exit test (the F3 pattern) | jfduke3d-browser | 01 | not written |
-| 03 | Data download (`data.js`, IndexedDB cache, file picker, `grptable.js` from `grpscan.c`; CON from the GRP only) | jfduke3d-browser | 02 | not written |
+| 03 | Data download (`data.js`, IndexedDB cache, file picker, `grptable.js` from `grpscan.c`; CON from the GRP only), **and the native-against-wasm determinism test** (deferred from 02: native `-testdump` against the wasm one, plus the frame-time check in its jfSW form) | jfduke3d-browser | 02 | not written |
 | 04 | Browser netplay, hidden-tab pass and drawing-state audit (jfSW's 04 and 04c together) | jfduke3d-browser, jfbuild | 01, 02, 03, A1 | not written |
 | 04b | Lag cuts | jfduke3d-browser, jfbuild | 04 | not written |
 | 05 | Host and join (page, lobby, Start now, Duke's menus, console and startup window, hidden-tab `dobonus`) | jfduke3d-browser, jfbuild | 04b | not written |
@@ -35,7 +36,7 @@ Later, not briefed: music (decision below), WebGL rendering through the GLES2 pa
 
 ## Settled decisions
 
-Don't reopen these inside a brief. If one proves wrong, stop and ask the user. D1 to D12 are jfSW's, adapted.
+Don't reopen these inside a brief. If one proves wrong, stop and ask the user. D1 to D12 are jfSW's, adapted; D13 and D14 are Duke's.
 
 - **D1. The browser is the end goal.** The native Linux build must keep working, and native players must be able to join browser rooms.
 - **D2. No joining mid-game.** The player count is fixed when the game starts, as it is today.
@@ -50,6 +51,7 @@ Don't reopen these inside a brief. If one proves wrong, stop and ask the user. D
 - **D11. Licensing:** only the shareware GRP may be offered for public download by default. Hosting registered data is the user's call. (The shareware licence's wording on multiplayer services is in `00-setup.md`, Outcome, "Licence"; brief 06 deals with it.)
 - **D12. Toolchain:** Emscripten 6.0.13, as Bit Riot and jfSW pin. `scripts/setup-emsdk.sh` is jfSW's, renamed.
 - **D13. File names.** The page files are `jfduke3d.js` and `jfduke3d.css`, with jfSW's structure (`web/` with `config.js`, `data.js`, `grptable.js`, `index.html`). The wasm output is `jfduke3d.*`.
+- **D14. Shareware network gate (user decision, 18 Nov 2026).** With the shareware GRP, network games are **refused by default**, with a clear message, whether plain UDP or through a relay, unless the player allows them: `[Comm Setup] AllowSharewareNetGames = 1` in `duke3d.cfg` (default 0) or `-allowsharewarenet` on the command line (before `-net`). Registered data (any GRP that is not the shareware one) always allows them. The reason is the shareware licence's `[3][D]` clause on an "online service providing multiplayer use" (`00-setup.md`, Outcome, "Licence"): shareware netplay is meant only for LAN deployments. The tests that run on shareware data turn the option on explicitly. The browser's equivalent (a `config.js` setting that adds the argument) and hiding the menu and console Host/Join entries when it is off are later briefs; every entry point must ask `NetGameAllowed()` (`src/netgame.h`). (Numbered D14 because D13 is the file names.)
 
 ## Answers to the open questions (18 Nov 2026)
 
