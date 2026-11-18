@@ -88,12 +88,93 @@ The user's answers (README). Push access to `VenKamikaze/jfduke3d-browser` (gran
 
 - **Git:** work on `browser/00-setup` (from `claude`, which is upstream `master` `55c5f95`). Push only that branch and `emscripten-ports`. Never merge, never touch `claude` or `master`, never open a PR, never force-push. The coordinator merges. This brief changes no fork.
 - Builds use `-j4` (the cloud container has 4 cores).
-- The game is built as C and linked as C++ (`code-facts.md` §0): the link line says `g++`.
+- The game is built as C and linked as C++ (top of `code-facts.md`): the link line says `g++`.
 - Network: report any host that is blocked. `web.archive.org` resets connections from the cloud container; GitHub archive URLs answer 403 (hence `emscripten-ports`).
 - Use placeholder host names (`game.example.org`) everywhere. Never commit game data.
 
 ## Outcome
 
-Status: **review** (branch `browser/00-setup`; the coordinator marks it done after review and merge). No game, engine or fork code changed; no fork repository was pushed.
+Status: **review** (branch `browser/00-setup`; the coordinator marks it done after review and merge). No game, engine or fork code changed; no fork repository was pushed. Commits on the branch, from `claude` (`55c5f95`): `dda549e` submodules and `.gitignore`; `49b6901` scripts, tests and the `make test` target; `4b4ea4f` the docs; and the commit that adds this Outcome. The `emscripten-ports` branch (`a8ec8bc`, jfSW's, unchanged) is pushed too.
 
-(Filled in below by the implementer.)
+**What landed**
+
+- `.gitmodules`: absolute URLs for the three forks, `branch = claude` for jfbuild and jfaudiolib, `branch = master` for jfmact. Pins: jfbuild `5950d14`, jfaudiolib `ff1b31d`, jfmact `731c0cc`. `ext/vnet` added at `v0.5.0` (`8572c74`), with no `branch =` line (as jfSW's). jfbuild's Makefile already compiles all 13 vnet sources into `libengine.a` (with `-D_POSIX_C_SOURCE=200809L`, so there was nothing to check by a throwaway compile).
+- `scripts/setup.sh`, `scripts/setup-emsdk.sh`, `scripts/fetch-test-data.sh`, `scripts/run-headless.sh`, `tests/fetch-test-data.sh`, `tests/run-headless.sh`, and a minimal `make test` (`test-scripts`: the two tests). `setup.sh` and `setup-emsdk.sh` are jfSW's current versions with `jfsw-browser` -> `jfduke3d-browser` (same emsdk revision `d7b4130`, Emscripten 6.0.13, same `EMSDK_DIR` and `EM_CACHE` variables). `fetch-test-data.sh` and `run-headless.sh` are rewritten for Duke (below). `.gitignore` lists `/testdata/`.
+- Orphan branch `emscripten-ports`, fetched from the local jfsw-browser clone and pushed unchanged (SDL2 `release-2.32.10.zip`, `libogg-1.3.5.zip`, `libvorbis-1.3.7.zip`, `SHA512SUMS`, a README; library archives only).
+- Docs: `README.md`, `PROMPT.md`, this brief, `code-facts.md` (299 lines; 14 sections; every `file:line` was checked mechanically against the source and the cited line read), `building.md`, `bugs.md`.
+
+**Test data**
+
+- Sources and checksums (both downloaded and verified here):
+
+  | Source | Zip MD5 | Size | Layout |
+  |---|---|---|---|
+  | `https://image.dosgamesarchive.com/games/3dduke13.zip` | `29b2f40990069d9cb0dbaf0f811d1118` | 5,910,927 | `INSTALL.EXE`, `DUKE3DS.IFC`, `DUKE3DS._1` … `_5`, `FILE_ID.DIZ`; `_1` … `_5` joined are one zip (with 1,380 bytes of header in front) holding the game's 20 files |
+  | `https://archive.org/download/3dduke13/3dduke13.zip` | `04e4ca70b8a2d59ed56c451c5c1d5d39` | 5,924,374 | `INSTALL.EXE`, `LICENSE.TXT`, `DN3DSW13.SHR` (a zip with 17 files), `FILE_ID.DIZ` |
+
+  The brief expected a nested `.SHR`; only the second release has one, so the script reads both. Both hold the same `DUKE3D.GRP`: **CRC32 `0x983AD923`, 11,035,779 bytes**, equal to the "Shareware Version" entry of `src/grpscan.c:45`. The fallback to archive.org was run for real (first URL broken on purpose). The GRP also holds `GAME.CON`, `USER.CON` and `DEFS.CON` (the log shows them compiled), `DUKE.RTS` is not in it.
+- `web.archive.org` was not tried (known to reset connections). No host was blocked.
+
+**Licence** (for brief 06's `deploy.md`). The licence is `LICENSE.DOC` inside the game archive (inside `DUKE3DS._1` … `_5` joined; `LICENSE.TXT` in `DN3DSW13.SHR` and beside it in the archive.org zip; the game's start-up text says "Please read LICENSE.DOC"). It is the "Episode One of Duke Nukem 3D … Copyright 1996 3D Realms Entertainment" licence: `[V.4.24.96]` in the dosgamesarchive release and `[V.7.16.98]` in the archive.org one; the two differ only in the telephone number and in the list of files, and the sections quoted here are the same word for word. Section [3] "GRANT":
+
+> [A] INDIVIDUALS are encouraged to share and give copies of the Game to friends, family, coworkers, and members of any not-for-profit organization, but only without charge.
+> [B] ONLINE SERVICES (including BBSs, and WWW and FTP sites) that are free (except for any subscription fees or incidental Internet access charges), and BBSs with 250 or fewer nodes (regardless of any charges to users) may make the Game available for downloading.
+> [C] These grants are subject to the conditions that no copyright information or trademark will be added or removed, and all of the Game's files as released by 3D Realms will be included without modification (except for "New Levels" …). The files at a minimum include: commit.exe, defs.con, demo1-3.dmo, dn3dhelp.exe, duke.rts, duke3d.exe, duke3d.grp, game.con, license.txt, modem.pck, readme.doc, setmain.exe, setup.exe, ultramid.ini, user.con …
+> [D] *ALL* other distribution, including by lease, rental, **online service (other than a fewer than 250 node BBS) that charges for online access time, online service providing multiplayer use**, CD-ROM, catalog, and retail rack REQUIRES WRITTEN PERMISSION (which 3D Realms may withhold in its discretion) AND PRE-PAYMENT OF A LICENSE FEE OR OTHER MUTUALLY AGREED BENEFIT.
+
+Points for brief 06 and the user: **(1)** [3][C] asks that all the game's files be distributed together and unmodified; the browser game serves only `DUKE3D.GRP`. **(2)** [3][D]'s "online service providing multiplayer use" can be read as covering a free web game with a multiplayer relay; the user should decide whether that matters (permission from 3D Realms, or only offering the single-player data path publicly). This is not legal advice; I only quote it. **(3)** [4] forbids new levels that work with the shareware episode.
+
+**Tests** (run here)
+
+- `tests/fetch-test-data.sh` against both real zips: **40 passed, 0 failed** (both layouts, the second-run no-op, a truncated zip, one flipped byte, right size and wrong CRC in each layout, a wrong size, a zip that is not `3dduke13.zip`, an unknown MD5, a stale bad GRP removed or replaced, leftovers of a killed run, a missing `python3`, the constants against `src/grpscan.c`). With the CRC check line removed from the script: **36 passed, 4 failed** (the wrong-CRC cases in both layouts exit 0 and leave the file); restored: 40 of 40. It also passes with no arguments (it downloads both zips).
+- `tests/run-headless.sh` (fake game, no data needed): **24 passed, 0 failed**, including a game that ignores SIGTERM (as Duke does) and must end as 124 with no "Killed" line, and `--sw` as an alias of `--game`. With the `2>/dev/null` that hides bash's "Killed" report removed: 23 passed, 1 failed.
+- `make test` runs both (about 15 s, with the downloads).
+
+**Native build** (fresh `git clone --recurse-submodules -b browser/00-setup`, `make -j4`, about 20 s): green with the defaults (12 warnings) and, after `make veryclean`, with `USE_POLYMOST=0 USE_OPENGL=0` (7 warnings); also with `WITHOUT_GTK=1`. Both build `duke3d` and `build`. **The jfbuild at `5950d14` needed no change in the game.** Warnings are listed in `code-facts.md` §11 (three in the game, none relevant). **Packages:** nothing new was installed; `scripts/setup.sh` ran `apt-get install` over packages that were already there and only **upgraded** `libglx-mesa0`, `libgbm1`, `libgbm-dev`, `mesa-libgallium`, `libgl1-mesa-dev`, `libgl1-mesa-dri`, `libegl1-mesa-dev`, `libegl-mesa0` and `ca-certificates`. Go 1.24.7 was already installed.
+
+**Headless run** (manual check). Commands and what they showed:
+
+```
+$ scripts/run-headless.sh --timeout 8 --workdir /tmp/wd -v1 -l1 -r
+run-headless: stopped after 8s                       (exit 124; the game does not exit on SIGTERM, the watchdog kills it)
+$ cat /tmp/wd/duke3d.log   (trimmed)
+Scanning for GRP files...   Checksumming duke3dshare.grp   GRP file: duke3dshare.grp
+Compiling: game.con (99639 bytes)   Including: DEFS.CON (28893 bytes)   Including: USER.CON (36960 bytes)
+Looks like Standard CON files.   * WARNING!(L157 game.con) Expected a 'action' label ...   Code Size: 48520 bytes (1425 labels).
+Duke Nukem 3D (Unregistered Shareware)   RTS file DUKE.RTS was not found
+Setting video mode 640x480 ...   FX_Init: trying SDL   SDLDrv: audio driver: dummy   Cache time: 3ms   Press F1 for Help
+$ ls /tmp/wd/demo1.dmo      -> exists (0 bytes: written through stdio, killed before the flush)
+```
+
+- **How I know it reached a level:** the log is silent after "Press F1 for Help", and the dummy video driver draws nothing, so I did two checks that are not part of the scripts: (1) `-r` makes `enterlevel` open `demo1.dmo` (`premap.c:1500-1501`), and the file exists after the run; (2) the same binary under `xvfb-run` with the real SDL video driver and a screenshot (`import -window root`) after 12 s of `-v1 -l1` shows **E1L1's rooftop with the status bar** (health 100, pistol 48 ammo), and, without `-v/-l`, pressing Space three times reaches the episode menu ("L.A. MELTDOWN, LUNAR APOCALYPSE, SHRAPNEL CITY"). The screenshots are game data and are not committed.
+- **How runs end:** only by the timeout (124). There is no self-ending run: demos loop and the menu has no timeout (`code-facts.md` §9). SIGTERM is taken for the Escape key, so the script has to SIGKILL the game 5 s later; the config is then not written.
+- Option names differ from jfSW: `-v1 -l1` (not `-level1`), `-r` records `demo1.dmo` (not `-dr`), `-dNAME` plays (not `-dp`); no `-demosync*`.
+
+**Exploratory, not a test (for brief 01):** with the relay from jfSW's cache (`vnet-relay-8572c74`) on `127.0.0.1`, two unchanged `run-headless.sh` games, `-- -net -relay 127.0.0.1:P -host-room 2 -- -v1 -l1` and `-- -net -relay … -room CODE -- -v1 -l1`, connected: the host logged "room code 8PJSHG … Player 1 is here", the guest "joined room … as 10.0.0.2 … Player 0 is here", and both reached the "Press F1 for Help" point. So the engine side works through the game's `-net` pass-through as it is. I did not look at whether the two then play in step (the guest log shows "PRESS SPACE TO RESTART LEVEL" after 15 s, not understood). Processes and relay were stopped afterwards.
+
+**setup-emsdk.sh** (the container may not download a second emsdk). Not run on a clean `EMSDK_DIR`. Instead, against jfSW's existing install and a private cache:
+
+```
+$ EMSDK_DIR=$HOME/.cache/jfsw-browser/emsdk EM_CACHE=/tmp/emcache scripts/setup-emsdk.sh --with-ports
+...                                                    (emsdk install/activate of an installed 6.0.13: no download)
+seeded port sdl2 from release-2.32.10.zip              (fetched from THIS repository's origin emscripten-ports, SHA-512 checked
+seeded port ogg from libogg-1.3.5.zip                   against the pinned emsdk's tools/ports/*.py)
+seeded port vorbis from libvorbis-1.3.7.zip
+emsdk 6.0.13 is installed in /root/.cache/jfsw-browser/emsdk
+$ emcc sdl.c -sUSE_SDL=2 -o sdl.js          -> links, no download     (EM_CACHE=/tmp/emcache)
+$ emcc ov.c -sUSE_OGG=1 -sUSE_VORBIS=1 ...  -> links; node ov.js prints "Xiph.Org libVorbis 1.3.7"
+```
+
+It exercises the script's logic (the git fetch of the `emscripten-ports` branch from `origin`, the hash check, the unpacking and the markers). The default install directory `~/.cache/jfduke3d-browser/emsdk` was **not** exercised (the script is jfSW's with one path changed). The private cache was deleted afterwards. The jfSW install's `.emscripten` file was rewritten by `emsdk activate` with the same content.
+
+**Fresh clone** (acceptance criterion 1 and 8): `git clone --recurse-submodules -b browser/00-setup https://github.com/VenKamikaze/jfduke3d-browser` took 8 s and gave `ext/vnet` `8572c74 (v0.5.0)`, jfaudiolib `ff1b31d`, jfbuild `5950d14`, jfmact `731c0cc`. In that clone: `make -j4`, `scripts/fetch-test-data.sh` (downloads and verifies) and `scripts/run-headless.sh --timeout 8 -v1 -l1 -r` (exit 124) all worked, and so did a `USE_POLYMOST=0 USE_OPENGL=0` rebuild. `git ls-files` lists no GRP, zip or `testdata`; `git diff --stat 55c5f95..` shows only scripts, tests, docs, `Makefile`, `.gitmodules`, `.gitignore` and the five submodule pointers.
+
+**Not verified:** the pacman path of `scripts/setup.sh` (no Arch machine); `setup-emsdk.sh` on an empty `EMSDK_DIR` (not allowed here, see above); the Windows and macOS startup windows and builds (not built).
+
+**Open questions for the coordinator**
+
+1. **The licence's [3][D]** ("online service providing multiplayer use"): see "Licence" above.
+2. **The engine's `Module.jfsw*` names** (`code-facts.md` §10): leave them and have the Duke page provide them, or rename in the shared fork for both games.
+3. **Bug numbering:** `bugs.md` proposes jfSW's L-numbers for shared engine bugs and `D1…` for Duke's own. Change it if you prefer one sequence.
+4. **Brief 01 may be smaller than expected:** the relay transport already works through the game's `-net` pass-through (exploratory run above), so 01 is mostly the test hooks (`-testquit`, a log line for the out-of-sync message, `-testdump`), the tests and the 4-player shareware cap.
+5. `code-facts.md` §5: the level-exit code has jfSW's L20 shape (not tested, not fixed). A1's level-exit test decides.
