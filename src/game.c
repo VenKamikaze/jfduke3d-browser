@@ -8545,6 +8545,11 @@ char moveloop()
             if (movefifoplc == movefifoend[i]) break;
         if (i >= 0) break;
         if( domovethings() ) return 1;
+
+        // A tic that ends the level is the last tic of it. Every machine runs that same tic, but not
+        // the same number of tics after it: it depends on how many inputs each has queued by then.
+        // The player state carried into the next level (ammo, weapons, health) would then differ.
+        if( ps[myconnectindex].gm&MODE_EOL ) break;
     }
     return 0;
 }
