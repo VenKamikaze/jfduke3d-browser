@@ -158,6 +158,7 @@ node tests/web/determinism.js               # brief 03: the same demo played nat
 node tests/web/smoke.js                     # intro, menu, a level, Escape, pointer, quit; no errors
 node tests/web/persist.js                   # settings and saves survive a reload (also one without quitting, and one 250 ms after a save)
 node tests/web/focus.js                     # brief 02c: a refused pointer lock or a lost focus does not end the game; a trap still does (about 1 minute)
+node tests/web/menu-keys.js                 # F-D3: F4 opens the sound menu (drawn), Escape gets the player back; the Options path is unchanged (about 30 seconds)
 node tests/web/loops.js                     # every loop of code-facts section 4 that the shareware data can reach: the page stays responsive and the loop ends
 node tests/web/frametime.js                 # frame intervals over 40 s of play; its "no stall over 100 ms" check FAILS in the cloud container (software-rendered Chromium), see its header
 ```
@@ -235,7 +236,7 @@ AllowSharewareNetGames = 1
 
 Registered data always allows them. The shareware licence ([3][D]) does not give permission for online multiplayer services, so shareware netplay is meant for a LAN. The examples above and all the tests pass the switch.
 
-**Test-only arguments** (after `--`; `src/testhooks.h`): `-testquit<N>` quit with status 0 after the N-th tic of the level (also in single player and demo playback), `-testsync` a sync byte of the whole state every tic (every player must use it), `-testnudge<T>` move this player 8 units at tic T (a desync on purpose), `-testdump<name>` write a 32 byte record per tic to `<name>` (read it with `tests/tools/testdump.py`), `-teststate[<T>]` also `<name>.state`, the state as text, `-testexit<T>` end the first level at tic T (every player must have it), `-teststall<T>,<ms>` stop this machine for `<ms>` ms at tic T of the first level, `-testfire[<N>]` hold fire with the chaingun and walk about from tic N (every player must have it), `-testpredict` check that the prediction never changes the simulation (A1). A run with `-testquit` ends by itself; `scripts/run-headless.sh` runs one and returns the game's status.
+**Test-only arguments** (after `--`; `src/testhooks.h`): `-testquit<N>` quit with status 0 after the N-th tic of the level (also in single player and demo playback), `-testsync` a sync byte of the whole state every tic (every player must use it), `-testnudge<T>` move this player 8 units at tic T (a desync on purpose), `-testdump<name>` write a 32 byte record per tic to `<name>` (read it with `tests/tools/testdump.py`), `-teststate[<T>]` also `<name>.state`, the state as text, `-testexit<T>` end the first level at tic T (every player must have it), `-teststall<T>,<ms>` stop this machine for `<ms>` ms at tic T of the first level, `-testfire[<N>]` hold fire with the chaingun and walk about from tic N (every player must have it), `-testpredict` check that the prediction never changes the simulation (A1), `-testmenu` print `TEST: menu N` whenever the menu of a game opens, changes or closes (D3). A run with `-testquit` ends by itself; `scripts/run-headless.sh` runs one and returns the game's status.
 
 Tests (all local, on 127.0.0.1, ports from `JFDUKE3D_TEST_PORT_BASE`, default 47400; they build the relay with Go into `~/.cache/jfduke3d-browser` the first time; each stops every process it started; keep `JFDUKE3D_TEST_KEEP=1` to keep a test's directory, `JFDUKE3D_TEST_VERBOSE=1` for the logs of a failing game):
 
@@ -250,6 +251,7 @@ tests/net/test-player-announce.sh [--game FILE] [--only relay-3|relay-4|udp-3]  
 tests/net/test-level-exit.sh [--game FILE] [--runs N] [--only NAME]   # D5, D6: the level ends at tic 200 with a machine stopped for 1.5 s: every machine plays 200 tics, all leave, dumps and states equal (relay-slave, relay-master, relay-3, udp-slave, udp-master, udp-3)
 tests/net/test-predict-pure.sh [--game FILE]                  # A1: -testpredict on every machine: the prediction never changes the simulation
 tests/net/test-single.sh [--game FILE] [--tics N]             # -testquit and -testdump in single player and demo playback
+tests/net/test-menu-f4.sh [--game FILE]                       # D3: native game on Xvfb with xdotool: F4 opens the sound menu, Escape gets the player back (skips itself without Xvfb, xdotool, ImageMagick or PIL)
 tests/net/test-udp-unchanged.sh --base-game "$(tests/net/build-baseline.sh)" [--mutate-wire]   # plain -net against the pre-brief build
 tests/net/test-errors.sh [--only REGEX] [--game FILE]         # bad code, full room, relay down, host leaves, caps
 tests/net/test-relay-lost.sh [--game FILE]                    # a relay session lost during a game
