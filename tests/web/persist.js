@@ -16,6 +16,8 @@ const t = require('./lib.js');
 
 const PORT = t.port(49103);
 const RELOAD_AFTER_MS = +(process.env.RELOAD_AFTER_MS || 250); const SAVE_TRIES = 3;  // how soon after a save reached its full size the page is reloaded (without quitting)
+const ONLY = process.env.PERSIST_ONLY || '';     // run one part only: persistent, settings, save, memory or idb
+const want = (n) => !ONLY || ONLY === n;
 const SETTLE_MS = 1500;        // how long after leaving the menus the page is reloaded in the settings test
 const LEVEL_LOAD_MS = 6000;    // the level takes a few seconds to load; keys sent before that are ignored
 
@@ -54,7 +56,7 @@ async function main() {
   try {
     const q = '?test=1&args=' + encodeURIComponent('-v1 -l1 -s1');
     // --- persistent ---
-    {
+    if (want('persistent')) {
       const context = await env.browser.newContext({ viewport: { width: 1000, height: 800 } });
       const s = await session(env, context, q, true);
       t.check(!s.before.includes('game0.sav') && !s.before.includes('duke3d.cfg'), 'fresh browser profile: no saved game or config yet');
@@ -83,7 +85,7 @@ async function main() {
       await context.close();
     }
     // --- settings survive a reload without quitting: Options, Sound Options, switch sound off, Escape ---
-    {
+    if (want('settings')) {
       const read = async (p) => p.evaluate(() => { const b = window.jfswTest.readFile('duke3d.cfg'); return b ? new TextDecoder().decode(b) : null; });
       const sound = (cfg) => { const m = cfg && /SoundToggle = (\d+)/.exec(cfg); return m ? +m[1] : null; };
       const context = await env.browser.newContext({ viewport: { width: 1000, height: 800 } });
@@ -120,7 +122,7 @@ async function main() {
       await context.close();
     }
     // --- a save made just before a reload: three tries, each in a fresh browser profile ---
-    {
+    if (want('save')) {
       let kept = 0;
       for (let i = 0; i < SAVE_TRIES; i++) {
         const context = await env.browser.newContext({ viewport: { width: 1000, height: 800 } });
@@ -144,7 +146,7 @@ async function main() {
       t.check(kept === SAVE_TRIES, `save: reloaded ${RELOAD_AFTER_MS} ms after game0.sav stopped growing, the save was still there in ${kept} of ${SAVE_TRIES} tries`);
     }
     // --- memory only: the same steps lose everything ---
-    {
+    if (want('memory')) {
       const context = await env.browser.newContext({ viewport: { width: 1000, height: 800 } });
       const s = await session(env, context, q + '&persist=0', true);
       t.check(s.saved > 1000, 'control run (persist=0): the game saved game0.sav');
@@ -158,6 +160,22 @@ async function main() {
       await t.tap(p2, 'F3'); await p2.waitForTimeout(1500);
       const empty = await t.redPixels(p2, t.SLOT1);
       t.check(empty < 50, `control run: with no save the load menu's slot 1 is empty (${empty} orange pixels), so the slot check can fail`);
+      await context.close();
+    }
+    // --- no IndexedDB (an old private window): the page starts anyway and says that nothing will be kept ---
+    if (want('idb')) {
+      const context = await env.browser.newContext({ viewport: { width: 1000, height: 800 } });
+      const page = await context.newPage();
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(env.base + q + '&idb=off');
+      const state = await t.waitState(page, ['ready', 'error', 'needdata']);
+      const status = await page.evaluate(() => document.getElementById('status').textContent);
+      t.check(state === 'ready' && /will not be kept/.test(status), `no IndexedDB (?idb=off): the page is ready and says nothing will be kept ("${status.slice(0, 90)}...")`);
+      if (state === 'ready') { await page.click('#start'); }
+      await page.waitForTimeout(LEVEL_LOAD_MS);
+      t.check((await page.evaluate(() => window.jfswState)) === 'running', 'no IndexedDB: the game starts and runs');
+      t.check(errors.length === 0, 'no IndexedDB: no page error', errors.join(' | '));
       await context.close();
     }
   } finally { await t.stop(env); }
