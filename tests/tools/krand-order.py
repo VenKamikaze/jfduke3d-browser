@@ -17,8 +17,9 @@
 # evaluated (f(TRAND) with f drawing numbers itself is fine: the argument is evaluated first).
 # The cure is to draw each number into a local, in the order you mean, in statements of their own (code-facts.md 19).
 #
-# Needs clang (the AST comes from `clang -Xclang -ast-dump=json`), python3 and the SDL2 headers (sdl2-config); about two
-# minutes and 1 GB of memory for all of src/. Without clang it prints NOT RUN and exits 3.
+# Needs clang (the AST comes from `clang -Xclang -ast-dump=json`), python3 and the SDL2 headers (sdl2-config); about 15 seconds
+# for all of src/ (part of `make test`). Without clang it prints NOT RUN and exits 3. A single FILE.c is scanned alone: the functions
+# that call krand() through others are only known from the files given, so scan all of src/ for a verdict.
 import glob, json, os, shutil, subprocess, sys, threading
 
 sys.setrecursionlimit(200000)

@@ -255,6 +255,8 @@ GAME_RUNS ?= 1
 test-scripts:
 	tests/fetch-test-data.sh
 	tests/run-headless.sh
+	@# F-D15: no place draws two or more random numbers in one expression (needs clang; 3 = not run)
+	tests/tools/krand-order.py; s=$$?; if [ $$s = 3 ]; then echo "krand-order.py: not run (no clang)"; else exit $$s; fi
 
 engine-current: duke3d$(EXESUFFIX)
 	$(MAKE) -C $(ENGINEROOT) -f Makefile \
