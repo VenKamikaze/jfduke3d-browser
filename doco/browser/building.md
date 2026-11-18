@@ -144,13 +144,17 @@ python3 -m http.server 8000 --bind 127.0.0.1
 # open http://127.0.0.1:8000/ in Chromium or Firefox, click "Click to start"
 ```
 
-This brief's page loads the GRP with a plain `fetch` (brief 03 replaces that with the download, checks and cache): the default is `duke3dshare.grp` next to the page, `?data=<url>` another file (it must send CORS headers if it is on another origin). The page writes it to `/data/duke3d.grp` for the game (the game recognises GRPs by CRC32, not by name). The game keeps `duke3d.cfg`, saved games and the log in IndexedDB (the folder `/persist`); `/data` is in memory only. Page options and test hooks (`?test=1`, which also needs `testMode: true` in `config.js`) are described at the top of `web/jfduke3d.js`.
+Brief 03's page downloads the GRP from the URL in `config.js` (`data.url`, `duke3dshare.grp` next to the page by default; `?data=<url>` overrides it, and the file must still be a GRP the game knows), shows the progress, checks its size and CRC-32 against `web/grptable.js` (a copy of `src/grpscan.c`'s table), keeps it in an IndexedDB database of its own (`jfduke3d-data`) so that a reload makes no request, and writes it to `/data/duke3d.grp` with a stable modification time for the game (the game recognises GRPs by CRC32, not by name). "Use your own copy of the game data..." takes a `.grp` from the visitor's disk (a registered one too). `doco/browser/data-hosting.md` says what to serve and how; `03-data-download.md` has the details. The game keeps `duke3d.cfg`, saved games, `grpfiles.cache` and the log in IndexedDB (the folder `/persist`); `/data` is in memory only. **CON scripts come from the GRP only** (`code-facts.md` §18). `config.js`'s `allowSharewareNetGames` (default `false`) adds `-allowsharewarenet` to the game's arguments (D14). Page options and test hooks (`?test=1`, which also needs `testMode: true` in `config.js`) are described at the top of `web/jfduke3d.js`.
 
 ### 6.4 Browser tests
 
 ```sh
-scripts/build-wasm.sh && make -j4           # (the native binary is not needed by these tests; brief 01's and the later determinism test need it)
-make test-web                               # the five below, one after the other (the last fails in the cloud container)
+scripts/build-wasm.sh && make -j4           # (the native binary is only needed by determinism.js; build it after the wasm build: `build-wasm.sh veryclean` removes it)
+make test-web                               # the ones below, one after the other (frametime.js fails in the cloud container)
+node tests/web/grptable.js                  # brief 03: web/grptable.js equals src/grpscan.c (`--write` regenerates it); the page's CRC-32 equals zlib's (no browser, a few seconds)
+node tests/web/data.js                      # brief 03: download and progress, the IndexedDB cache, errors, the file picker, quota, config changes, the shareware network gate (about 4 minutes)
+node tests/web/con.js                       # brief 03: CON scripts come from the GRP only, except in test mode (about 2 minutes)
+node tests/web/determinism.js               # brief 03: the same demo played natively and in the browser gives the same -testdump, tic for tic (about 10 minutes; see its header, and bugs.md D15)
 node tests/web/smoke.js                     # intro, menu, a level, Escape, pointer, quit; no errors
 node tests/web/persist.js                   # settings and saves survive a reload (also one without quitting, and one 250 ms after a save)
 node tests/web/focus.js                     # brief 02c: a refused pointer lock or a lost focus does not end the game; a trap still does (about 1 minute)
@@ -158,7 +162,7 @@ node tests/web/loops.js                     # every loop of code-facts section 4
 node tests/web/frametime.js                 # frame intervals over 40 s of play; its "no stall over 100 ms" check FAILS in the cloud container (software-rendered Chromium), see its header
 ```
 
-They use the preinstalled Chromium through Playwright (`require('playwright')`; never run `playwright install`), serve `build-wasm/` and `testdata/duke3dshare.grp` on 127.0.0.1 ports 49101 and up (persist.js 49103, focus.js 49104, loops.js 49105, frametime.js 49106), and clean up after themselves. `focus.js` uses the full Chromium build in headless mode (`channel: 'chromium'`, the same preinstalled browser) rather than Playwright's default headless shell, which reports no mouse movement under pointer lock and crashes on a wasm trap. `JFDUKE3D_WEB_PORT_OFFSET=<n>` moves every port the browser tests use up by n, so that two checkouts can run them on one machine at once. Several of the checks have a sabotage switch that must make them fail: see the top of each test file.
+They use the preinstalled Chromium through Playwright (`require('playwright')`; never run `playwright install`), serve `build-wasm/` and `testdata/duke3dshare.grp` on 127.0.0.1 ports 49101 and up (persist.js 49103, focus.js 49104, loops.js 49105, frametime.js 49106; data.js 48201 and 48202, con.js 48301, determinism.js 48102), and clean up after themselves. `focus.js` uses the full Chromium build in headless mode (`channel: 'chromium'`, the same preinstalled browser) rather than Playwright's default headless shell, which reports no mouse movement under pointer lock and crashes on a wasm trap. `JFDUKE3D_WEB_PORT_OFFSET=<n>` moves every port the browser tests use up by n, so that two checkouts can run them on one machine at once. Several of the checks have a sabotage switch that must make them fail: see the top of each test file.
 
 #### Firefox (brief 02c's port; optional, not part of the default runs)
 
@@ -182,6 +186,17 @@ As in jfSW: Playwright's Firefox needs Playwright's own patched build, so `firef
 | `Makefile` (`test`, `test-scripts`) | runs those two tests |
 | `ext/vnet` | vnet `v0.5.0` (submodule; built into `jfbuild/libengine.a`; the game uses it through `-relay` since brief 01) |
 | `doco/browser/code-facts.md` | what the code does, with file:line |
+
+Brief 03 added:
+
+| Path | What |
+|---|---|
+| `web/data.js`, `web/grptable.js` | the download, the checks and the IndexedDB cache (jfSW's, with Duke's names); the table of known GRPs, generated from `src/grpscan.c` |
+| `web/config.js` | `data.url/size/crc32/revalidate`, `allowSharewareNetGames` |
+| `doco/browser/data-hosting.md` | what to serve and how |
+| `src/gamedef.c`, `src/game.c` | CON scripts from the GRP only under `__EMSCRIPTEN__` (`-testloosecon` lifts it in test mode) |
+| `tests/web/data.js`, `dataserver.js`, `grptable.js`, `con.js`, `determinism.js` | the tests |
+| `tests/tools/synth_input.c`, `tests/tools/build-native-clang.sh` | the scripted player for recording a demo, and a clang native build (for `determinism.js`) |
 
 Brief 02 added:
 
