@@ -33,7 +33,7 @@ window.JFSW_CONFIG = {
 - `allowSharewareNetGames`: **leave `false` on a public site.** `true` makes the page start the game with `-allowsharewarenet`, which lets the shareware game take part in network games. Set it only for a LAN deployment: a private network of people who each have the right to play the shareware version (a party, a classroom). It is read from this file only; nothing in the page address can switch it on. Registered data (a file the player picks, or a GRP you host yourself) allows network games whatever this says. Network games themselves arrive with brief 04.
 - `relay` is for brief 05 and is not used yet. `testMode` **must stay `false` on a public site**: with `true`, a link with `?test=1` could pass the game test arguments, and could put loose game files (among them a CON script that changes the simulation) in the game's folder.
 
-`?data=<url>` on the page address overrides `data.url` (the declared `size` and `crc32` are then ignored; the file must still be a known GRP).
+`?data=<url>` on the page address overrides `data.url` (the declared `size` and `crc32` are then ignored; the file must still be a known GRP). **Outside test mode only a URL on the page's own origin is accepted** (it is resolved against the page address): any other `?data=` is ignored with a console warning, so a link cannot make a visitor's page load a game from another site. To use data on another origin, set `data.url` in `config.js`.
 
 **CON scripts come from the GRP only.** The page never writes a loose `GAME.CON`, `DEFS.CON` or `USER.CON`, and the browser build of the game reads those three from the GRP even if a loose copy were there (`code-facts.md` §18): players with the same GRP play the same game. (Only test mode lifts this.)
 

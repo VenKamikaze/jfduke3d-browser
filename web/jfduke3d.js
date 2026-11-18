@@ -12,7 +12,8 @@
 //
 // Query string:
 //   ?data=<url>   fetch the GRP from this URL instead of the one in config.js (size and CRC32 of config.js
-//                 are then not checked; the file must still be a GRP the game knows).
+//                 are then not checked; the file must still be a GRP the game knows). Outside test mode only a URL on
+//                 the page's own origin is taken; another is ignored with a console warning.
 //   ?test=1       test hooks (below), only when config.js has testMode: true (a link alone cannot turn them on).
 //                 Nothing else here reads the other options.
 //   ?args=...     game arguments, space separated (test only), e.g. "-v1 -l1 -s1".
@@ -65,7 +66,19 @@
   // on (never the address) and only for a deployment that is a LAN; it adds -allowsharewarenet to the game's arguments.
   var ALLOW_SHAREWARE_NET = !!(window.JFSW_CONFIG && window.JFSW_CONFIG.allowSharewareNetGames === true);
 
-  var DATA_OVERRIDE = params.get('data');
+  // ?data=: outside test mode only a URL on this page's own origin (resolved against the address) is taken; another is ignored.
+  // A link must not be able to make a visitor's page fetch and run a game from somewhere else, and the cache and the picker are
+  // for the configured file. (Test mode needs a cross-origin one for the CORS checks.)
+  var DATA_OVERRIDE = (function () {
+    var d = params.get('data');
+    if (!d) { return null; }
+    if (TEST) { return d; }
+    try {
+      if (new URL(d, location.href).origin === location.origin) { return d; }
+    } catch (e) { /* not a URL */ }
+    console.warn('?data= ignored: outside test mode it must be a URL on this page\'s own origin (' + d + ')');
+    return null;
+  })();
   var DATA_DIR = '/data';        // on the game's search path (DATADIR in the Makefile); not persisted
   var HOME_DIR = '/persist';     // the game's current directory: duke3d.cfg, saves, duke3d.log; IndexedDB
   var GRP_NAME = 'duke3d.grp';
@@ -399,16 +412,19 @@
       (res.from === 'revalidated' ? ' (the server says it is still current).' : '.');
   }
 
-  function dataReady(res) {
+  var preparing = null;       // finishPrepare() once started: a second load (the picker) must not run it again
+
+  function dataReady(res, mine) {
     writeGrp(res);
     window.jfswData = { source: res.source, from: res.from, name: res.name, size: res.size, crc: res.crc, cached: res.cached, notes: res.notes, crcMs: res.crcMs, downloadMs: res.downloadMs, storedAt: res.storedAt };
     dataInfoEl.hidden = false;
     dataInfoEl.textContent = describeData(res);
     progressEl.hidden = true;
     setControls(true, { redownload: res.source === 'download', useDownload: res.source === 'local' });
-    var after = prepared ? Promise.resolve() : finishPrepare();
+    var after = prepared ? Promise.resolve() : (preparing || (preparing = finishPrepare().catch(function (e) { preparing = null; throw e; })));
     return after.then(function () {
       prepared = true;
+      if (mine !== gen) { return; }        // another load (the picker) started while the test files came: it decides the state
       var notes = res.notes.join(' ');
       showStatus('Ready.' + (storageNote ? storageNote : '') + (notes ? ' ' + notes : ''), !!(storageNote || notes));
       startBtn.hidden = false;
@@ -443,7 +459,7 @@
     dataInfoEl.hidden = true;
     showStatus('Loading game data...');
     return JfswData.load(dataOptions(Object.assign({ signal: ctl.signal }, extra))).then(function (res) {
-      if (mine === gen) { return dataReady(res); }
+      if (mine === gen) { return dataReady(res, mine); }
     }, function (e) {
       if (mine === gen) { dataFailed(e); }
     }).then(function () { if (mine === gen) { loadCtl = null; } }, function (e) {

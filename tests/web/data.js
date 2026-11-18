@@ -3,7 +3,7 @@
 // the file picker, quota and no-IndexedDB, config changes, compression, revalidation.
 //
 //   node tests/web/data.js
-//   DATA_SABOTAGE=nocache|nocrc|nosize|nocheck|nopickcache|nomtime|trusthit|nostall|netaddr|nonetflag|nocachesync node tests/web/data.js
+//   DATA_SABOTAGE=nocache|nocrc|nosize|nocheck|nopickcache|nomtime|trusthit|nostall|netaddr|nonetflag|nocachesync|nosuperseded|nogen|truncfall|dataany node tests/web/data.js
 //       serves a damaged copy of the page's own code so that the matching tests must FAIL (they are listed in the Outcome
 //       of doco/browser/03-data-download.md). Nothing in the repository is changed.
 //
@@ -38,6 +38,11 @@ const PATCHES = {
   netaddr: ['jfduke3d.js', [["var ALLOW_SHAREWARE_NET = !!(window.JFSW_CONFIG && window.JFSW_CONFIG.allowSharewareNetGames === true);", "var ALLOW_SHAREWARE_NET = !!(window.JFSW_CONFIG && window.JFSW_CONFIG.allowSharewareNetGames === true) || params.get('allowsharewarenet') === '1' || params.get('allowSharewareNetGames') === 'true';"]]],
   nonetflag: ['jfduke3d.js', [["if (ALLOW_SHAREWARE_NET) { a.push('-allowsharewarenet'); }", ""]]],
   // grpfiles.cache is kept in IndexedDB only when something else syncs the folder (what jfSW's page does)
+  // a load that was superseded still writes to the cache / a stale load still sets 'ready' / only a dead connection falls back to the copy / ?data= takes any origin
+  nosuperseded: ['data.js', [['function superseded() { return !!(o.signal && o.signal.aborted); }', 'function superseded() { return false; }']]],
+  nogen: ['jfduke3d.js', [['      if (mine !== gen) { return; }        // another load', '      // another load']]],
+  truncfall: ['data.js', [["(e.kind === 'network' || e.kind === 'truncated')", "(e.kind === 'network')"]]],
+  dataany: ['jfduke3d.js', [['    if (TEST) { return d; }\n    try {', '    if (true) { return d; }\n    try {']]],
   nocachesync: ['jfduke3d.js', [['function cacheChanged() { return cacheText() !== persistedCache; }', 'function cacheChanged() { return false; }']]],
 };
 function patched() {
@@ -680,6 +685,88 @@ async function main() {
       await reachMenu(r.page, 'second load, cfg in place');
       t.check(!(await outHas(r.page, /Checksumming/)), 'cache kept: the next start did not checksum the GRP again (grpfiles.cache was written to IndexedDB although nothing else changed)');
       await r.context.close();
+    }
+
+    // ---- 15. A load that was replaced writes nothing and sets nothing; fall back on a cut-off answer; ?data= is same-origin ---------------
+    console.log('15. races, revalidation fallbacks, ?data= outside test mode');
+    {
+      good();
+      // (a) data.js: a load aborted while its file is being read must not store it (the person picked another file meanwhile).
+      let r = await t.open(env, '?test=1&persist=0');
+      await waitLoaded(r.page);
+      const meta = (page) => page.evaluate(() => new Promise((resolve) => {
+        const open = indexedDB.open('jfduke3d-data');
+        open.onsuccess = () => { const db = open.result; const g = db.transaction('meta').objectStore('meta').get('source'); g.onsuccess = () => { db.close(); resolve(g.result && g.result.value); }; };
+        open.onerror = () => resolve(null);
+      }));
+      t.check((await meta(r.page)) === 'url', 'superseded load: (set-up) the downloaded copy is the source');
+      await r.page.evaluate(async () => {
+        const bytes = new Uint8Array(await (await fetch('/duke3dshare.grp')).arrayBuffer());
+        const ctl = new AbortController();
+        const file = { name: 'late.grp', arrayBuffer: () => new Promise((res) => setTimeout(() => res(bytes.buffer), 400)) };
+        const p = JfswData.load({ url: 'duke3dshare.grp', size: 11035779, crc32: '983ad923', file, signal: ctl.signal, stallMs: 0 });
+        setTimeout(() => ctl.abort(), 100);
+        try { await p; } catch (e) { /* cancelled or not: only the cache matters */ }
+      });
+      t.check(!(await cacheRecords(r.page)).local, 'superseded load: the cancelled load did not store its file');
+      t.check((await meta(r.page)) === 'url', 'superseded load: and did not change which copy is the source');
+      await r.context.close();
+
+      // (b) the page: a load that finishes preparing after another one started must not set 'ready'.
+      server.routes['/f/slow.bin'] = route({ body: Buffer.alloc(1 << 20, 1), chunk: 65536, delayMs: 30 });
+      r = await t.open(env, '?test=1&persist=0&files=' + encodeURIComponent('/f/slow.bin'));
+      await r.page.waitForFunction(() => window.jfswData !== undefined, null, { timeout: 60000 });
+      await r.page.setInputFiles('#pick', { name: 'notes.grp', mimeType: 'application/octet-stream', buffer: Buffer.from('not a grp at all') });
+      await r.page.waitForTimeout(2500);
+      t.check((await st(r.page)) === 'needdata' && !(await visible(r.page, '#start')), 'stale load: while the test files came a bad file was picked: the page stays at needdata, with no Click to start', (await st(r.page)) + ' ' + (await statusText(r.page)).slice(0, 80));
+      await r.context.close();
+      delete server.routes['/f/slow.bin'];
+
+      // (c) revalidate: a cut-off answer falls back to the kept copy; a wrong file does not.
+      swap('/duke3dshare.grp', { body: GOOD, etag: '"v8"' });
+      r = await t.open(env, '?test=1&persist=0');
+      await waitLoaded(r.page);
+      fresh();
+      swap('/duke3dshare.grp', { body: GOOD, etag: '"v9"', cutAt: 3000000 });
+      await r.page.goto(env.base + '?test=1&persist=0&revalidate=1');
+      await waitLoaded(r.page);
+      t.check((await st(r.page)) === 'ready' && /cut off/.test(await statusText(r.page)) && /kept in this browser/.test(await infoText(r.page)), 'revalidate=1, the answer is cut off: the kept copy is used, with a notice', (await st(r.page)) + ' ' + (await statusText(r.page)));
+      const bad = Buffer.from(GOOD); bad[1000000] ^= 1;
+      swap('/duke3dshare.grp', { body: bad, etag: '"v10"' });
+      await r.page.goto(env.base + '?test=1&persist=0&revalidate=1');
+      await waitLoaded(r.page);
+      t.check((await st(r.page)) === 'needdata' && /checksum is wrong/.test(await statusText(r.page)), 'revalidate=1, a wrong file at the URL: no fallback, the error is shown', (await st(r.page)) + ' ' + (await statusText(r.page)).slice(0, 100));
+      good();
+      await r.context.close();
+
+      // (d) ?data= outside test mode: this origin only.
+      server2.routes['/duke3dshare.grp'] = route({ body: GOOD, cors: true });
+      swap('/other.grp', { body: GOOD });
+      const plainOpen = async (query) => {
+        const context = await browser.newContext({ viewport: { width: 1000, height: 800 } });
+        const page = await context.newPage();
+        const warnings = [];
+        page.on('console', (m) => { if (m.type() === 'warning') { warnings.push(m.text()); } });
+        await page.goto(env.base + query);
+        return { page, context, warnings };
+      };
+      const other = `http://127.0.0.1:${PORT2}/duke3dshare.grp`;
+      fresh(); server2.requests.length = 0;
+      let q = await plainOpen('?data=' + encodeURIComponent(other));
+      await waitLoaded(q.page);
+      t.check((await st(q.page)) === 'ready' && server2.hits('/duke3dshare.grp') === 0 && server.hits('/duke3dshare.grp') === 1, 'plain page, ?data= on another origin (that allows CORS): ignored, the configured file is used', `${await st(q.page)} other ${server2.hits('/duke3dshare.grp')} own ${server.hits('/duke3dshare.grp')}`);
+      t.check(q.warnings.some((w) => /\?data= ignored/.test(w)), 'plain page, ?data= on another origin: a console warning says so', q.warnings.join(' | '));
+      await q.context.close();
+      q = await plainOpen('?data=' + encodeURIComponent('//127.0.0.1:' + PORT2 + '/duke3dshare.grp'));
+      await waitLoaded(q.page);
+      t.check(server2.hits('/duke3dshare.grp') === 0 && q.warnings.some((w) => /\?data= ignored/.test(w)), 'plain page, ?data=//other-origin/...: ignored as well');
+      await q.context.close();
+      fresh();
+      q = await plainOpen('?data=/other.grp');
+      await waitLoaded(q.page);
+      t.check((await st(q.page)) === 'ready' && server.hits('/other.grp') === 1 && /other\.grp/.test(await infoText(q.page)), 'plain page, ?data=/other.grp (same origin): used', await infoText(q.page));
+      await q.context.close();
+      server2.routes['/duke3dshare.grp'] = route({ body: GOOD });
     }
   } finally {
     await browser.close();

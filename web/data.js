@@ -7,7 +7,8 @@
 //   JfswData.crc32(bytes), JfswData.identify(crc, size), JfswData.forgetAll().
 //
 // The cache is an IndexedDB database of its own, "jfduke3d-data" (not the game's /persist folder, which is
-// IDBFS; and not jfSW's "jfsw-data", so that both games can be served from one origin).
+// IDBFS). jfSW's is "jfsw-data", but that does not make one origin enough for both games: the game's own IDBFS
+// database is named after its mount point, /persist, in both (03-data-download.md): one origin per game.
 // Store "files": one record per source, key "url:<absolute url>" for the download and "local" for the file
 // the person picked. Store "meta": { key: 'source', value: 'url' | 'local' }.
 (function () {
@@ -303,9 +304,13 @@
     // Urls whose records stay when the page is opened with a ?data= override (the configured file).
     var keep = (o.keepUrls || []).map(function (u) { return 'url:' + new URL(u, location.href).href; });
 
+    // A load that was cancelled (the person picked a file) or superseded writes nothing: its put() or setMeta('source') would
+    // overwrite what the load that replaced it stored (the picked file, with source 'local').
+    function superseded() { return !!(o.signal && o.signal.aborted); }
+
     function store(rec) {
-      if (!cache) { return Promise.resolve(false); }
-      return cache.put(rec).then(function () { return cache.setMeta('source', rec.key === LOCAL_KEY ? 'local' : 'url'); }).then(function () {
+      if (!cache || superseded()) { return Promise.resolve(false); }
+      return cache.put(rec).then(function () { return superseded() ? null : cache.setMeta('source', rec.key === LOCAL_KEY ? 'local' : 'url'); }).then(function () {
         ask().then(function () {});
         return true;
       }, function (e) {
@@ -393,8 +398,10 @@
               return result(fresh, 'network', { cached: stored, crcMs: d.crcMs, downloadMs: downloadMs });
             });
           }, function (e) {
-            // Could not ask the server, but a copy that was good is in the browser: use it.
-            if (headers && e && (e.kind === 'network')) { notes.push('The server could not be reached to check for a newer version; using the copy kept in this browser.'); return result(rec, 'cache'); }
+            // Could not ask the server, but a copy that was good is in the browser: use it. That is when the server could not be
+            // reached or answered nothing in time ('network'), or the answer was cut off or stalled ('truncated'). Not when it
+            // answered with a wrong file ('corrupt', 'size', 'unknown'): a wrong file at the URL is worth surfacing.
+            if (headers && e && (e.kind === 'network' || e.kind === 'truncated')) { notes.push('The server could not be reached, or its answer was cut off, to check for a newer version; using the copy kept in this browser.'); return result(rec, 'cache'); }
             throw e;
           });
         });
