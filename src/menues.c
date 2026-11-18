@@ -1104,6 +1104,10 @@ int getfilenames(char *path, char kind[])
 
 int quittimer = 0;
 
+#ifdef __EMSCRIPTEN__
+static int menuwasopen = 0;
+#endif
+
 void menus(void)
 {
     CACHE1D_FIND_REC *dir;
@@ -1114,9 +1118,17 @@ void menus(void)
 
     if( (ps[myconnectindex].gm&MODE_MENU) == 0 )
     {
+#ifdef __EMSCRIPTEN__
+        // A browser tab can be closed or reloaded at any time and the game then never reaches its
+        // normal exit, which is where duke3d.cfg is written. Write it whenever the menu is left.
+        if (menuwasopen) { menuwasopen = 0; CONFIG_WriteSetup(); }
+#endif
         walock[TILE_LOADSHOT] = 1;
         return;
     }
+#ifdef __EMSCRIPTEN__
+    menuwasopen = 1;
+#endif
 
     CONTROL_GetUserInput(&uinfo);
     CONTROL_ClearUserInput(&uinfo);

@@ -121,6 +121,13 @@ endif
 ifeq ($(PLATFORM),DARWIN)
 	OURLDFLAGS+= -framework Foundation
 endif
+ifeq ($(PLATFORM),EMSCRIPTEN)
+	# Browser: the page puts the GRP in /data (a folder that is not persisted).
+	OURCPPFLAGS+= -DDATADIR=\"/data\"
+	# Compile at -O2 as the link does (the native default is -O1).
+	CFLAGS:=$(patsubst -O1,-O2,$(CFLAGS))
+	CXXFLAGS:=$(patsubst -O1,-O2,$(CXXFLAGS))
+endif
 
 ifeq ($(RENDERTYPE),SDL)
 	OURCFLAGS+= $(SDLCONFIG_CFLAGS)
@@ -150,7 +157,12 @@ endif
 
 # TARGETS
 .PHONY: clean veryclean all
+ifeq ($(PLATFORM),EMSCRIPTEN)
+all: wasm
+include Makefile.emscripten
+else
 all: duke3d$(EXESUFFIX) build$(EXESUFFIX)
+endif
 
 include Makefile.deps
 
