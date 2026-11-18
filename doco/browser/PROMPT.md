@@ -8,7 +8,7 @@ You are the **coordinator** for a multi-brief project in [`VenKamikaze/jfduke3d-
 
 ## 0. Where things stand (hand-off; keep this up to date after every merge)
 
-**18 Nov 2026: briefs 00 and 01 have landed on `claude`; brief 02 is merged into `browser/02-emscripten-port` with `claude` (`cab7a05`) and waits for the coordinator's check ("merged (coordinator check pending)"). Next: F-D1, then A1, then 03.**
+**18 Nov 2026: briefs 00, 01 and 02 have landed on `claude` (02 after the coordinator's check; `menues.c` CRLF restored). Next: F-D1, then A1 and 03.**
 
 - **Landed since 00 (read `01-native-relay.md` and `02-emscripten-port.md`, Outcomes):**
   - **01:** native relay games and plain UDP, test hooks (`-testquit`, `-testsync`, `-testnudge`, `-testdump`), `make test`, `test-net`. **`-testdump`** is 32 bytes per tic: eight little endian words (tic, random seed, six FNV-1a hashes: players, sprites, hittype, sectors, walls, other), state before the tic (`code-facts.md` 15.2). **The shareware network gate (D14):** off by default; `AllowSharewareNetGames = 1` under `[Comm Setup]` in `duke3d.cfg` or `-allowsharewarenet` turns it on; `NetGameAllowed()` decides on the data actually mounted. **D1 is confirmed** (packet 6 is re-sent to the wrong slaves with 3 or more players) and needs a fix brief **F-D1 before A1**. **L18 (a vanished host is not noticed) is shared with jfSW** and stays a documented limitation.
