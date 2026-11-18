@@ -231,6 +231,7 @@ make test-net GAME_RUNS=3      # the rest; needs testdata/duke3dshare.grp
 tests/net/test-mmulti-vnet.sh --runs 10 [--stub-resend]       # mmulti over vnet with loss, duplication, reordering
 tests/net/test-three-games.sh [--udp] [--players N] [--tics N] [--impair SPEC] [--nudge N:T] [--no-testsync]   # N game processes, co-op, quit after N tics, every -testdump the same
 tests/net/test-desync.sh [--game FILE]                        # a -testnudge is logged and shows in -testdump, with and without -testsync
+tests/net/test-player-announce.sh [--game FILE] [--only relay-3|relay-4|udp-3]   # D1: every machine holds every player's announced settings (a different configuration for each player), dumps equal
 tests/net/test-single.sh [--game FILE] [--tics N]             # -testquit and -testdump in single player and demo playback
 tests/net/test-udp-unchanged.sh --base-game "$(tests/net/build-baseline.sh)" [--mutate-wire]   # plain -net against the pre-brief build
 tests/net/test-errors.sh [--only REGEX] [--game FILE]         # bad code, full room, relay down, host leaves, caps

@@ -265,7 +265,8 @@ test-mmulti: engine-current
 
 # game processes through a relay (2, 3 and 4 players, with impairment) and over plain UDP, each machine's
 # -testdump the same; a deliberate desync is caught; -testdump in single player and demo playback;
-# plain UDP against the old build; errors; a lost relay session; the shareware network gate
+# plain UDP against the old build; errors; a lost relay session; the shareware network gate;
+# every machine holds every player's announced settings (test-player-announce.sh, D1)
 test-net: engine-current
 	for i in $$(seq $(GAME_RUNS)); do tests/net/test-three-games.sh --relay || exit 1; done
 	tests/net/test-three-games.sh --relay --players 2
@@ -273,6 +274,7 @@ test-net: engine-current
 	tests/net/test-three-games.sh --relay --impair "loss=3,dup=2,reorder=3,lat=10,jit=5" --tics 600
 	tests/net/test-three-games.sh --udp
 	tests/net/test-desync.sh
+	tests/net/test-player-announce.sh
 	tests/net/test-single.sh
 	tests/net/test-udp-unchanged.sh --base-game "$$(tests/net/build-baseline.sh)"
 	tests/net/test-errors.sh
