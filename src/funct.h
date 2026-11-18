@@ -185,6 +185,7 @@ extern void Shutdown(void );
 extern void allowtimetocorrecterrorswhenquitting(void );
 extern void getpackets(void );
 extern void faketimerhandler(void);
+extern void sendmasterpackets(int upto);
 extern void checksync(void );
 extern void check_fta_sounds(short i);
 extern short inventory(spritetype *s);
