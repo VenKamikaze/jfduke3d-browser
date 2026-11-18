@@ -214,3 +214,13 @@ $(SRC)/version-auto.c:
 	printf "const char *game_version = \"%s\";\n" "$(shell git describe --always || echo git error)" > $@
 	echo "const char *game_date = __DATE__;" >> $@
 	echo "const char *game_time = __TIME__;" >> $@
+
+# TESTS (brief 00: the tests of the scripts. Brief 01 adds the network tests; see
+# doco/browser/building.md.) tests/fetch-test-data.sh downloads the two shareware zips
+# unless JFDUKE3D_TEST_ZIP and JFDUKE3D_TEST_ZIP2 name local copies.
+.PHONY: test test-scripts
+test-scripts:
+	tests/fetch-test-data.sh
+	tests/run-headless.sh
+
+test: test-scripts
