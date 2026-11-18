@@ -54,6 +54,7 @@ void TestDumpArg(const char *name);
 void TestExitArg(int tic);
 void TestStallArg(const char *arg);
 void TestFireArg(int tic);
+void TestArmArg(void);          // -testarm: every weapon with full ammo, and full health, in every tic (D15's demos)
 void TestPredictArg(void);
 void TestPredictBegin(void);    // fakedomovethings(), at its start and its end (-testpredict)
 void TestPredictEnd(void);

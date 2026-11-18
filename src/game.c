@@ -7048,6 +7048,9 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"testfire",8)) {
                     TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
                 }
+                else if (!Bstrcasecmp(c,"testarm")) {
+                    TestArmArg();               // test-only: every weapon, full ammunition and health in every tic
+                }
                 else if (!Bstrcasecmp(c,"name")) {
                     if (argc > i+1) {
                         CommandName = argv[i+1];
