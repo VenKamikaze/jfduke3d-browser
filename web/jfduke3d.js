@@ -40,7 +40,7 @@
   var TEST = params.get('test') === '1' && !!(window.JFSW_CONFIG && window.JFSW_CONFIG.testMode === true);
   var PERSIST = !(TEST && params.get('persist') === '0');
   if (TEST && params.get('idb') === 'off') {
-    // Test hook: what an old Firefox private window did: opening a database fails (for the game's IDBFS and the data cache).
+    // Test hook: what an old Firefox private window did: opening a database fails (for the game's IDBFS; brief 03's data cache will use it too).
     var failing = function () {
       var req = {};
       setTimeout(function () {

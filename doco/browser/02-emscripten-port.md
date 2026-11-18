@@ -81,7 +81,7 @@ Status: **review** (branch `browser/02-emscripten-port` in jfduke3d-browser only
   - *Game data:* jfSW's 02 dev loader: `?data=<url>`, default a same-origin `duke3dshare.grp`, written as `/data/duke3d.grp`; no cache. **CON scripts: from the GRP only.** The page writes no loose file; `?files=` (needs `?test=1` and `testMode: true`) is the only way, and only `loops.js` uses it (a loose GAME.CON that ends the episode).
 - **Game change (one).** `menus()` in `src/menues.c` writes `duke3d.cfg` when the menu is left (`#ifdef __EMSCRIPTEN__`, a static flag and 7 lines), as jfSW's `ExitMenus()` does: Duke writes it only at `Shutdown()` (`code-facts.md` 15.8), which a closed or reloaded tab never reaches. No loop was touched. Nothing in the simulation changed.
 
-**Commits** (branch `browser/02-emscripten-port`): `9d3ee53` build and page, `d583c68` tests, then the later commits listed by `git log` (the last one is this Outcome).
+**Commits** (branch `browser/02-emscripten-port`, from `claude` `7e0cd72`): `9d3ee53` build, page, the `menus()` change; `d583c68` the tests, `make test-web`, `setup-firefox.sh`, the brief and `building.md`; `367d06e` `frametime.js`, `code-facts.md` 15, `bugs.md` D1 and D2; `12e4895` the no-IndexedDB check and this Outcome; and one last commit with the hashes in this paragraph.
 
 **Tests** (Chromium through Playwright, one at a time under `flock /tmp/jfd-heavy-tests.lock`, load 2 to 3 on 4 cores; Firefox 160.0 and puppeteer-core 25.17.0 from jfSW's cache through `FIREFOX_CACHE`)
 
