@@ -271,15 +271,20 @@ test-mmulti: engine-current
 # game processes through a relay (2, 3 and 4 players, with impairment) and over plain UDP, each machine's
 # -testdump the same; a deliberate desync is caught; -testdump in single player and demo playback;
 # plain UDP against the old build; errors; a lost relay session; the shareware network gate;
-# every machine holds every player's announced settings (test-player-announce.sh, D1)
+# every machine holds every player's announced settings (test-player-announce.sh, D1); every machine plays the
+# same tics of a level and all leave it (test-level-exit.sh, D5 and D6); the prediction never changes the
+# simulation (test-predict-pure.sh); a player without sound plays the same game (--nosound)
 test-net: engine-current
 	for i in $$(seq $(GAME_RUNS)); do tests/net/test-three-games.sh --relay || exit 1; done
 	tests/net/test-three-games.sh --relay --players 2
 	tests/net/test-three-games.sh --relay --players 4
 	tests/net/test-three-games.sh --relay --impair "loss=3,dup=2,reorder=3,lat=10,jit=5" --tics 600
 	tests/net/test-three-games.sh --udp
+	tests/net/test-three-games.sh --relay --nosound 1 --fire --tics 600
 	tests/net/test-desync.sh
 	tests/net/test-player-announce.sh
+	tests/net/test-level-exit.sh
+	tests/net/test-predict-pure.sh
 	tests/net/test-single.sh
 	tests/net/test-udp-unchanged.sh --base-game "$$(tests/net/build-baseline.sh)"
 	tests/net/test-errors.sh

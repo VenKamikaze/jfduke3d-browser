@@ -23,6 +23,11 @@
 #                    at tic T (-testnudge): a deliberate desync that must make
 #                    this test FAIL (see test-desync.sh, which expects it)
 #   --no-testsync    leave -testsync out (one sync byte every 8 tics: the game's own check)
+#   --nosound N      A1: process N (0 = host) runs with sound off (-ns) while the others have it: a game that
+#                    played a sound (or not) must not play differently (jfSW's L27 pattern: sound-gated
+#                    random numbers; code-facts.md 17)
+#   --fire           A1: every player holds fire and walks about from tic 100 (-testfire), so that shots,
+#                    hits and kills make sounds
 #
 # What counts, from each process's duke3d.log: exit status 0; the line
 #   TEST: quitting after T game tics: C sync checks, M mismatches, sync every 1 tic, player I of P
@@ -36,7 +41,7 @@
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-mode=relay; tics=900; players=3; game="$root/duke3d"; impair=""; nudge=""; testsync="-testsync"
+mode=relay; tics=900; players=3; game="$root/duke3d"; impair=""; nudge=""; testsync="-testsync"; nosound=""; fire=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --relay) mode=relay; shift ;;
@@ -47,6 +52,8 @@ while [ $# -gt 0 ]; do
         --impair) impair="$2"; shift 2 ;;
         --nudge) nudge="$2"; shift 2 ;;
         --no-testsync) testsync=""; shift ;;
+        --nosound) nosound="$2"; shift 2 ;;
+        --fire) fire="-testfire100"; shift ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -54,15 +61,16 @@ t_need_data
 
 rport=$((port_base + 20))
 uport=$((port_base + 30))
-auto="-v1 -l1 -c2 $testsync -testquit$tics -testdumpd.bin"
+auto="-v1 -l1 -c2 $testsync -testquit$tics -testdumpd.bin $fire"
 limit=$((tics / 20 + 60))      # seconds: a hang detector, generous for a loaded machine
 every=1; [ -z "$testsync" ] && every=8
 
-t_note "$players-player coop game, $tics tics, $mode${impair:+, impairment $impair}${nudge:+, nudge $nudge}${testsync:+, -testsync}"
+t_note "$players-player coop game, $tics tics, $mode${impair:+, impairment $impair}${nudge:+, nudge $nudge}${testsync:+, -testsync}${nosound:+, player $nosound without sound}${fire:+, firing and walking}"
 
 game_args() {   # player index -> args after "--"
     local n="$1" a="$auto"
     [ -n "$nudge" ] && [ "${nudge%%:*}" = "$n" ] && a="$a -testnudge${nudge##*:}"
+    [ -n "$nosound" ] && [ "$nosound" = "$n" ] && a="$a -ns"
     echo "$a"
 }
 
@@ -100,6 +108,11 @@ for n in $(seq 0 $((players - 1))); do
     t_check "player $n played ${reached:-?} tics (need $tics or more; ${line:-no TEST line})" test "${reached:-0}" -ge "$tics"
     t_check "player $n logged no desync" bash -c "! grep -q 'OUT OF SYNC' '$log' '$t_tmp/p$n.out'"
     t_check "player $n saw no version mismatch" bash -c "! grep -q 'different versions' '$log' '$t_tmp/p$n.out'"
+    if [ "$nosound" = "$n" ]; then
+        t_check "player $n ran with sound off" grep -q '^TEST: SoundToggle 0,' "$log"
+    elif [ -n "$nosound" ]; then
+        t_check "player $n ran with sound on" grep -q '^TEST: SoundToggle 1,' "$log"
+    fi
     checks="$(echo "$line" | sed -n 's/.*: \([0-9]*\) sync checks.*/\1/p')"
     need=$((tics - 40)); [ "$every" -eq 8 ] && need=$((tics / 8 - 8))
     t_check "player $n made ${checks:-?} sync checks (need at least $need)" test "${checks:-0}" -ge "$need"

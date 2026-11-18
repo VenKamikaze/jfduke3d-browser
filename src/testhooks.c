@@ -5,9 +5,16 @@
 #include "testhooks.h"
 #include "netgame.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 int TestSyncOn = 0;
 int TestQuitTics = 0;
 int TestNudgeTic = -1;
+static int TestExitTic;         // -testexit<T>; 0 = off
+static int TestFireOn, TestFireFrom;
+static int TestLevelNo;         // the number of the level being played: 1 for the first, counted at its tic 1
 
 void TestSyncArg(void)         { TestSyncOn = 1; }
 void TestQuitArg(int tics)     { TestQuitTics = tics; }
@@ -18,7 +25,7 @@ void TestNudgeArg(int tic)     { TestNudgeTic = tic; }
 // here a mismatch ends the game with a message, and a different -testquit is harmless to the game.)
 int TestVersionSalt(void)
 {
-    return TestSyncOn ? 8 : 0;
+    return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0);
 }
 
 int TestSyncTic(int index)
@@ -35,7 +42,9 @@ int TestSyncTic(int index)
 // machines disagreeing also finds which part of the state they disagree about:
 //   players   ps[] of every connected player: all of the simulation's fields, but not the ones that
 //             are a machine's own (palette pointer, gm, the on-screen message fta/ftq, zoom,
-//             visibility, the flash colour pals, refresh_inventory), and not the
+//             visibility, the flash colour pals, refresh_inventory, orotscrnang: displayrooms() writes it
+//             in OpenGL mode, scream_voice: the audio voice handle spritesound() returns, only ever
+//             given to FX_StopSound(); code-facts.md section 17), and not the
 //             kill statistics actors_killed / max_actors_killed (actors.c credits every kill to
 //             ps[myconnectindex], so they differ between machines: A1's list). The settings
 //             each player announces (packet 6: aim_mode, auto_aim, weaponswitch, ud.wchoice and
@@ -118,11 +127,10 @@ static void WalkState(emit_fn e)
         P(heat_amount); P(actorsqu); P(timebeforeexit); P(customexitsound);
         for (k = 0; k < 16; k++) { sprintf(nm, "weaprecs%d", k); E(PART_PLAYERS, i, nm, p->weaprecs[k]); }
         P(weapreccnt); P(interface_toggle_flag);
-        P(orotscrnang); P(rotscrnang); P(dead_flag); P(show_empty_weapon);
+        P(rotscrnang); P(dead_flag); P(show_empty_weapon);
         P(scuba_amount); P(jetpack_amount); P(steroids_amount); P(shield_amount);
         P(holoduke_on); P(pycount); P(weapon_pos); P(frag_ps);
         P(transporter_hold); P(last_full_weapon); P(footprintshade); P(boot_amount);
-        P(scream_voice);
         P(on_warping_sector); P(footprintcount);
         P(hbomb_on); P(jumping_toggle); P(rapid_fire_hold); P(on_ground);
         P(inven_icon); P(buttonpalette);
@@ -333,7 +341,7 @@ static void TestStateTic(int tic)
             return;
         }
     }
-    fprintf(TestStateFile, "t%d randomseed=%d\n", tic, randomseed);
+    fprintf(TestStateFile, "t%d randomseed=%d level=%d\n", tic, randomseed, TestLevelNo);
     stlast_part = -1; stlast_obj = -2;
     WalkState(TextEmit);
     if (stlast_part >= 0) fputc('\n', TestStateFile);
@@ -393,11 +401,205 @@ static void TestDumpTic(int tic)
     fflush(TestDumpFile);
 }
 
+// ---- -testexit<T>, -teststall<T>,<ms>, -testfire[<N>] (A1: the level-exit test) ----------------------
+//
+// -testexit<T>: at game tic T of the first level every machine starts the countdown that a sector with
+// lotag -2 starts (player.c's processinput: timebeforeexit 2 becomes 1 in this tic, and then every
+// player's gm becomes MODE_EOL, the level number goes up: the writer at player.c:2516, which runs inside
+// the tic on every machine, at the same tic). Only player connecthead is given the countdown (every
+// player's would count the level up twice). The co-op bonus screen is skipped by the game itself
+// (dobonus returns at once for co-op), so a headless game goes on into the next level. In the version
+// byte (a machine without it would not leave the level).
+//
+// -teststall<T>,<ms>: at game tic T of the first level, after the exit if it is the same tic, this machine
+// stops for <ms> ms with its clock running, then goes on with the tic. The other machines go on making
+// their inputs meanwhile, so this one comes back with the inputs of more tics than the others in its
+// fifo, and its own are made in a burst. It is how a machine gets tics' inputs in its fifo at the exit
+// that the others never have (the tics moveloop() ran after MODE_EOL before the fix). In the browser it
+// yields (ASYNCIFY) so that network events are taken in; natively a busy wait (the datagrams wait in
+// the socket). Per machine: changes nothing in the simulation.
+//
+// -testfire[<N>]: from game tic N of the first level on (from its start without N) and in every later
+// level, this machine's own inputs select the chaingun (weapon 4) and hold the fire key (and walk about): the ammo
+// changes every few tics, and in co-op it is carried into the next level. The inputs go over the network as any
+// other, and at tic 1 every machine gives every player the weapons, so it is in the version byte.
+
+static int TestExitDone;
+static int TestStallTic, TestStallMs, TestStallDone;
+
+void TestExitArg(int tic)  { TestExitTic = tic; }
+void TestFireArg(int tic)  { TestFireOn = 1; TestFireFrom = tic; }
+
+void TestStallArg(const char *arg)
+{
+    const char *c = strchr(arg, ',');
+
+    TestStallTic = atoi(arg);
+    TestStallMs = c ? atoi(c + 1) : 1000;
+}
+
+static void TestStall(void)
+{
+#ifndef __EMSCRIPTEN__
+    unsigned int t0;
+#endif
+
+    buildprintf("TEST: stalling for %d ms at tic %d\n", TestStallMs, movefifoplc + 1);
+#ifdef __EMSCRIPTEN__
+    emscripten_sleep(TestStallMs);
+#else
+    t0 = getticks();
+    while ((int)(getticks() - t0) < TestStallMs)
+        ;
+#endif
+    // the clock as a timer interrupt would have kept it: faketimerhandler() then makes the inputs that fell due
+    sampletimer();
+}
+
+void TestInputHook(void)
+{
+    int n;
+
+    // the input being made is fifo index movefifoend[myconnectindex], which game tic movefifoend + 1 of this level runs
+    if (!TestFireOn || (TestLevelNo <= 1 && movefifoend[myconnectindex] + 1 < TestFireFrom))
+        return;
+    loc.bits = (loc.bits & ~(15 << 8)) | (4 << 8) | (1 << 2);      // weapon 4 (the chaingun), fire
+    // and move about, in a pattern of the input's number, so that an input of another level or another
+    // moment is told from the right one by where the player goes
+    n = movefifoend[myconnectindex];
+    loc.fvel = (n & 7) * 120 + 200;
+    loc.svel = ((n >> 2) & 1) ? 300 : -300;
+    loc.avel = ((n >> 4) & 1) ? 6 : -4;
+}
+
+// The main loop found MODE_EOL: how many tics this machine played of the level, and how many more tics'
+// inputs it had from every player by then (what moveloop() would run after the exit without the fix).
+void TestLevelEnd(void)
+{
+    int i, more = MOVEFIFOSIZ;
+
+    if (TestExitTic <= 0 && TestStallTic <= 0)
+        return;
+    for (i = connecthead; i >= 0; i = connectpoint2[i])
+        if (movefifoend[i] - movefifoplc < more) more = movefifoend[i] - movefifoplc;
+    buildprintf("TEST: left the level after tic %d, with the inputs of %d more tics here (sent up to tic %d)\n",
+        movefifoplc, more, movefifosendplc);
+}
+
+// ---- -testpredict (A1): prediction must not change the simulation -------------------------------------
+//
+// fakedomovethings() (game.c) predicts the local player's moves from the inputs not yet confirmed. It is
+// called from moveloop() and fakedomovethingscorrect() at any moment between tics, so it must leave every
+// bit of the real simulation as it found it (it writes the my* copies and, temporarily, the cstat of the
+// player's sprite). With -testpredict every call is checked: the raw bytes of every table the simulation
+// keeps (ps[], sprite[], hittype[], sector[], wall[], ud, the sprite lists, the random seed, ...) are hashed
+// just before and just after, and a difference is logged and counted. The raw bytes, not WalkState's
+// fields: even what the state hash leaves out as a machine's own must not be written by the prediction.
+
+static int TestPredictOn;
+static int PredictChecked, PredictChanged;
+static unsigned int PredictBefore[8];
+
+void TestPredictArg(void) { TestPredictOn = 1; }
+
+static unsigned int RawHash(const void *p, size_t n)
+{
+    const unsigned char *b = (const unsigned char *)p;
+    unsigned int h = HASH_INIT;
+    size_t i;
+
+    for (i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
+    return h;
+}
+
+static const char *PredictNames[8] = { "ps", "sprite", "hittype", "sector", "wall", "ud", "sprite lists", "scalars" };
+
+static void PredictHashAll(unsigned int *h)
+{
+    int scalars[8], i;
+    unsigned int lists = HASH_INIT, t;
+
+    h[0] = RawHash(ps, sizeof(ps));
+    h[1] = RawHash(sprite, sizeof(sprite));
+    // not the entries of the ambient sound sprites: the audio callback (sounds.c testcallback(), run by the
+    // audio thread when a sound ends) writes their temp_data[0] at any moment, which is not the prediction
+    h[2] = HASH_INIT;
+    for (i = 0; i < MAXSPRITES; i++)
+        if (!(sprite[i].statnum == 11 && sprite[i].picnum == MUSICANDSFX))
+            fnv_int(&h[2], (int)RawHash(&hittype[i], sizeof(hittype[i])));
+    h[3] = RawHash(sector, sizeof(sector));
+    h[4] = RawHash(wall, sizeof(wall));
+    h[5] = RawHash(&ud, sizeof(ud));
+#define L(a) do { t = RawHash(a, sizeof(a)); fnv_int(&lists, (int)t); } while (0)
+    L(headspritesect); L(prevspritesect); L(nextspritesect);
+    L(headspritestat); L(prevspritestat); L(nextspritestat);
+    L(spriteq); L(frags); L(po);
+#undef L
+    h[6] = lists;
+    scalars[0] = randomseed; scalars[1] = global_random; scalars[2] = numplayers;
+    scalars[3] = movefifoplc; scalars[4] = numsectors; scalars[5] = numwalls;
+    scalars[6] = spriteqloc; scalars[7] = animatecnt;
+    h[7] = RawHash(scalars, sizeof(scalars));
+}
+
+void TestPredictBegin(void)
+{
+    if (TestPredictOn) PredictHashAll(PredictBefore);
+}
+
+void TestPredictEnd(void)
+{
+    unsigned int after[8];
+    int i;
+    char what[160] = "";
+
+    if (!TestPredictOn) return;
+    PredictHashAll(after);
+    PredictChecked++;
+    for (i = 0; i < 8; i++)
+        if (after[i] != PredictBefore[i]) {
+            strcat(what, what[0] ? ", " : "");
+            strcat(what, PredictNames[i]);
+        }
+    if (what[0]) {
+        PredictChanged++;
+        if (PredictChanged <= 5)
+            buildprintf("TEST: prediction %d (fakemovefifoplc %d, movefifoplc %d) changed the simulation: %s\n",
+                PredictChecked, fakemovefifoplc, movefifoplc, what);
+    }
+}
+
 // ---- The hooks in domovethings() ---------------------------------------------------------------
 
 void TestTicHook(void)
 {
     int tic = movefifoplc + 1;      // movefifoplc is advanced further on in domovethings()
+
+    if (tic == 1) TestLevelNo++;
+    if (tic == 1 && TestLevelNo == 1 && (TestSyncOn || TestDumpName[0]))
+        buildprintf("TEST: SoundToggle %d, AmbienceToggle %d\n", SoundToggle, AmbienceToggle);
+
+    // a game started with -v1 -l1 gives co-op players no weapons (newgame() only does for a deathmatch;
+    // a game started from the menu resets them with the new-game packet): give them the starting ones,
+    // so that -testfire has ammo to spend (every machine does it at the same point of the simulation)
+    if (TestFireOn && tic == 1 && TestLevelNo <= 1) {
+        int i;
+        for (i = connecthead; i >= 0; i = connectpoint2[i]) {
+            resetweapons(i);
+            ps[i].gotweapon[CHAINGUN_WEAPON] = 1;
+            ps[i].ammo_amount[CHAINGUN_WEAPON] = 300;
+        }
+    }
+
+    if (TestExitTic > 0 && !TestExitDone && TestLevelNo <= 1 && tic == TestExitTic) {
+        TestExitDone = 1;
+        ps[connecthead].timebeforeexit = 2;
+        buildprintf("TEST: ending the level at tic %d (level %d)\n", tic, ud.level_number);
+    }
+    if (TestStallTic > 0 && !TestStallDone && TestLevelNo <= 1 && tic == TestStallTic) {
+        TestStallDone = 1;
+        TestStall();
+    }
 
     if (TestNudgeTic >= 0 && tic == TestNudgeTic) {
         buildprintf("TEST: nudging player %d at tic %d\n", myconnectindex, TestNudgeTic);
@@ -416,14 +618,19 @@ static void TestQuitFinish(void)
     buildprintf("TEST: quitting after %d game tics: %d sync checks, %d mismatches, sync every %d tic%s, player %d of %d\n",
         movefifoplc, NetSyncChecks, NetSyncMismatches, TestSyncOn ? 1 : 8, TestSyncOn ? "" : "s",
         myconnectindex, numplayers);
+    if (TestPredictOn)
+        buildprintf("TEST: prediction: %d predicted moves checked, %d changed the simulation\n", PredictChecked, PredictChanged);
     if (TestDumpFile) fflush(TestDumpFile);
 
     // a player that is a few tics behind still needs what we send: keep acknowledging and
-    // resending for a moment before leaving
+    // resending for a moment before leaving, and (the master) send the slaves the tics it has played
+    // and not yet forwarded (the last tic is played before it is forwarded when a slave is slow)
     if (numplayers > 1) {
         until = getticks() + 1500;
         while (getticks() < until) {
             handleevents();
+            getpackets();
+            if (networkmode == 0 && myconnectindex == connecthead) sendmasterpackets(movefifoplc);
             flushpackets();
         }
     }
@@ -432,6 +639,13 @@ static void TestQuitFinish(void)
 
 void TestTicEnd(void)
 {
+    static int reported;
+
+    // (a tic that ended the level: the same line on every machine, for the tests)
+    if ((TestExitTic > 0 || TestStallTic > 0) && !reported && (ps[myconnectindex].gm & MODE_EOL)) {
+        reported = 1;
+        buildprintf("TEST: the level ended in tic %d, next level %d\n", movefifoplc, ud.level_number);
+    }
     if (TestQuitTics > 0 && movefifoplc >= TestQuitTics)
         TestQuitFinish();
 }
