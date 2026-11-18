@@ -93,6 +93,8 @@ Game options used above: `-v1 -l1` (episode 1, level 1, skipping the logo and me
 
 ## 6. Emscripten (browser builds, from brief 02 on)
 
+### 6.1 Toolchain
+
 ```sh
 scripts/setup-emsdk.sh                  # emsdk + Emscripten 6.0.13 into ~/.cache/jfduke3d-browser/emsdk
 scripts/setup-emsdk.sh --with-ports     # the same, plus the SDL2, Ogg and Vorbis ports
@@ -148,14 +150,15 @@ This brief's page loads the GRP with a plain `fetch` (brief 03 replaces that wit
 
 ```sh
 scripts/build-wasm.sh && make -j4           # (the native binary is not needed by these tests; brief 01's and the later determinism test need it)
-make test-web                               # the three below, one after the other
+make test-web                               # the five below, one after the other (the last fails in the cloud container)
 node tests/web/smoke.js                     # intro, menu, a level, Escape, pointer, quit; no errors
 node tests/web/persist.js                   # settings and saves survive a reload (also one without quitting, and one 250 ms after a save)
 node tests/web/focus.js                     # brief 02c: a refused pointer lock or a lost focus does not end the game; a trap still does (about 1 minute)
 node tests/web/loops.js                     # every loop of code-facts section 4 that the shareware data can reach: the page stays responsive and the loop ends
+node tests/web/frametime.js                 # frame intervals over 40 s of play; its "no stall over 100 ms" check FAILS in the cloud container (software-rendered Chromium), see its header
 ```
 
-They use the preinstalled Chromium through Playwright (`require('playwright')`; never run `playwright install`), serve `build-wasm/` and `testdata/duke3dshare.grp` on 127.0.0.1 ports 49101 and up (persist.js 49103, focus.js 49104, loops.js 49105), and clean up after themselves. `focus.js` uses the full Chromium build in headless mode (`channel: 'chromium'`, the same preinstalled browser) rather than Playwright's default headless shell, which reports no mouse movement under pointer lock and crashes on a wasm trap. `JFDUKE3D_WEB_PORT_OFFSET=<n>` moves every port the browser tests use up by n, so that two checkouts can run them on one machine at once. Several of the checks have a sabotage switch that must make them fail: see the top of each test file.
+They use the preinstalled Chromium through Playwright (`require('playwright')`; never run `playwright install`), serve `build-wasm/` and `testdata/duke3dshare.grp` on 127.0.0.1 ports 49101 and up (persist.js 49103, focus.js 49104, loops.js 49105, frametime.js 49106), and clean up after themselves. `focus.js` uses the full Chromium build in headless mode (`channel: 'chromium'`, the same preinstalled browser) rather than Playwright's default headless shell, which reports no mouse movement under pointer lock and crashes on a wasm trap. `JFDUKE3D_WEB_PORT_OFFSET=<n>` moves every port the browser tests use up by n, so that two checkouts can run them on one machine at once. Several of the checks have a sabotage switch that must make them fail: see the top of each test file.
 
 #### Firefox (brief 02c's port; optional, not part of the default runs)
 
@@ -179,3 +182,14 @@ As in jfSW: Playwright's Firefox needs Playwright's own patched build, so `firef
 | `Makefile` (`test`, `test-scripts`) | runs those two tests |
 | `ext/vnet` | vnet `v0.5.0` (submodule; built into `jfbuild/libengine.a` already, not used by the game yet) |
 | `doco/browser/code-facts.md` | what the code does, with file:line |
+
+Brief 02 added:
+
+| Path | What |
+|---|---|
+| `Makefile.emscripten`, `scripts/build-wasm.sh` | the browser build into `build-wasm/` (section 6.2) |
+| `web/` | the page: `index.html`, `jfduke3d.js`, `jfduke3d.css`, `config.js` |
+| `tests/web/` | `lib.js`, `server.js` (shared), `smoke.js`, `persist.js`, `focus.js`, `loops.js`, `frametime.js`, `firefox.js` + `firefox-deps/` |
+| `scripts/setup-firefox.sh` | a pinned stock Firefox and `puppeteer-core` for `firefox.js` |
+| `Makefile` (`test-web`) | runs the browser tests |
+| `src/menues.c` | the one game change: `duke3d.cfg` is written when the menu is left (`__EMSCRIPTEN__` only) |

@@ -3,8 +3,8 @@
 //
 //   node tests/web/loops.js
 //   LOOPS_SABOTAGE=nokey node tests/web/loops.js   # presses no key: the loops that wait for one never end, those checks must FAIL
-//   LOOPS_SABOTAGE=hang  node tests/web/loops.js   # the page's main thread is held for 1.5 s inside a measurement, as a loop that
-//                                                  # never yields would hold it: the responsiveness checks must FAIL
+//   LOOPS_SABOTAGE=hang  node tests/web/loops.js   # the page's main thread is held for 1.5 s inside the first measurement (as a loop
+//                                                  # that never yields would hold it): that responsiveness check must FAIL
 //
 // Duke's loops wait without returning to the main loop: they poll the clock and the keyboard (`handleevents()`) and draw
 // (`nextpage()`). In the browser the engine hands control back to the page from those two calls (jfbuild/src/sdlayer2.c,
@@ -40,17 +40,19 @@ async function key(page, k, ms) { if (!NOKEY) { await t.tap(page, k, ms || 120);
 // game made. A page held by the game never answers, so the question has a time limit.
 let hung = false;
 async function window_(page, ms) {
-  if (HANG && !hung) { hung = true; page.evaluate((n) => { const t0 = performance.now(); while (performance.now() - t0 < n) { /* hold the main thread */ } }, 1500).catch(() => {}); }
-  const probe = page.evaluate((span) => new Promise((resolve) => {
+  const hold = HANG && !hung ? 1500 : 0;      // (sabotage) the main thread is held inside the first measurement
+  hung = hung || hold > 0;
+  const probe = page.evaluate(({ span, hold }) => new Promise((resolve) => {
     const y0 = Module.jfswYieldLog.length, t0 = performance.now();
-    let last = t0, max = 0, n = 0;
+    let last = t0, max = 0, n = 0, held = false;
     const f = () => {
+      if (hold && !held) { held = true; const h0 = performance.now(); while (performance.now() - h0 < hold) { /* a loop that never yields */ } }
       const now = performance.now();
       max = Math.max(max, now - last); last = now; n++;
       if (now - t0 < span) { requestAnimationFrame(f); } else { resolve({ gap: max, frames: n, yields: (Module.jfswYieldLog.length - y0) * 1000 / (now - t0) }); }
     };
     requestAnimationFrame(f);
-  }), ms);
+  }), { span: ms, hold });
   return Promise.race([probe, sleep(ms + 8000).then(() => ({ gap: Infinity, frames: 0, yields: 0 }))]);
 }
 const okWindow = (w) => w.gap < 1000 && w.yields > 15;

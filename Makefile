@@ -172,6 +172,8 @@ test-web:
 	node tests/web/persist.js
 	node tests/web/focus.js
 	node tests/web/loops.js
+	# frametime.js fails in the cloud container (stalls over 100 ms in a software-rendered Chromium): see its header
+	node tests/web/frametime.js
 
 include Makefile.deps
 
