@@ -164,4 +164,4 @@ Open `http://127.0.0.1:8000/` in Chromium and then in Firefox. Click "Click to s
 7. **Frame times on your hardware** (needs Node.js and Playwright with a Chromium on your machine: `npm i playwright && npx playwright install chromium`): `node tests/web/frametime.js` (about 1 minute; it prints the intervals and fails only if a frame takes over 100 ms). And the whole set: `make test-web` (about 10 minutes; the last test is that one).
 8. Report anything that freezes (the page should always show a message when the game ends or crashes), a key that does nothing in Firefox, and anything that sounds late.
 
-F4 in a game freezes the game in an invisible menu (`bugs.md` D3): don't use it.
+F4 in a game used to freeze the game in an invisible menu (`bugs.md` D3); fixed by F-D3 (`F-D3-f4-menu.md`), so it opens the sound menu and Escape closes it.

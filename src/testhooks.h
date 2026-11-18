@@ -29,6 +29,7 @@
 //                      (the inputs travel as any other), so the ammo count changes every few tics. It also
 //                      gives every player the starting weapons and 300 chaingun rounds at tic 1, so every
 //                      player must be given it (version byte).
+//   -testmenu          (D3) "TEST: menu N" is printed whenever the menu of a game opens, changes or closes.
 //   -testpredict       (A1) every call of fakedomovethings() (the prediction of the local player's moves) is
 //                      checked: the raw bytes of every table of the simulation are hashed before and after
 //                      it, and "TEST: prediction ... changed the simulation" is logged for a difference
@@ -56,9 +57,14 @@ void TestStallArg(const char *arg);
 void TestFireArg(int tic);
 void TestArmArg(void);          // -testarm: every weapon with full ammo, and full health, in every tic (D15's demos)
 void TestPredictArg(void);
+void TestMenuArg(void);
 void TestPredictBegin(void);    // fakedomovethings(), at its start and its end (-testpredict)
 void TestPredictEnd(void);
 void TestStateArg(int tic);     // -teststate[<T>]: with -testdump, also <name>.state, the state as text (tics 1, 2 and T)
+
+// Called every frame from displayrest() (-testmenu): prints "TEST: menu N" when the menu in a game changes
+// (N is current_menu while MODE_MENU is set, -1 when the game is not in a menu).
+void TestMenuPoll(void);
 
 // Called from faketimerhandler() right after the local input is made (-testfire).
 void TestInputHook(void);

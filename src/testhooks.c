@@ -504,6 +504,24 @@ static unsigned int PredictBefore[8];
 
 void TestPredictArg(void) { TestPredictOn = 1; }
 
+// -testmenu: report the menu state of a game, for the tests that press F4 and the like (bugs.md D3).
+static int TestMenuOn;
+
+void TestMenuArg(void) { TestMenuOn = 1; }
+
+void TestMenuPoll(void)
+{
+    static int last = -2;
+    int now;
+
+    if (!TestMenuOn) return;
+    now = (ps[myconnectindex].gm & MODE_MENU) ? current_menu : -1;
+    if (now != last) {
+        last = now;
+        buildprintf("TEST: menu %d\n", now);
+    }
+}
+
 static unsigned int RawHash(const void *p, size_t n)
 {
     const unsigned char *b = (const unsigned char *)p;
