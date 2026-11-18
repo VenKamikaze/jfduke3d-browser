@@ -27,6 +27,10 @@
 //   -testfire[<N>]     (A1) from game tic N of the first level on (from the start without N) and in
 //                      every later level, this machine's own inputs select the chaingun and hold fire
 //                      (the inputs travel as any other), so the ammo count changes every few tics.
+//   -testpredict       (A1) every call of fakedomovethings() (the prediction of the local player's moves) is
+//                      checked: the raw bytes of every table of the simulation are hashed before and after
+//                      it, and "TEST: prediction ... changed the simulation" is logged for a difference
+//                      (the count is in the line -testquit prints).
 // Everything is off without its argument, and nothing here goes on the wire except -testsync
 // and -testexit (the version byte of packet 6).
 
@@ -48,6 +52,9 @@ void TestDumpArg(const char *name);
 void TestExitArg(int tic);
 void TestStallArg(const char *arg);
 void TestFireArg(int tic);
+void TestPredictArg(void);
+void TestPredictBegin(void);    // fakedomovethings(), at its start and its end (-testpredict)
+void TestPredictEnd(void);
 void TestStateArg(int tic);     // -teststate[<T>]: with -testdump, also <name>.state, the state as text (tics 1, 2 and T)
 
 // Called from faketimerhandler() right after the local input is made (-testfire).

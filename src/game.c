@@ -7038,6 +7038,9 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"teststall",9)) {
                     TestStallArg(c+9);          // test-only: this machine stops for a while at tic T of the first level
                 }
+                else if (!Bstrcasecmp(c,"testpredict")) {
+                    TestPredictArg();           // test-only: check that the prediction never changes the simulation
+                }
                 else if (!Bstrncasecmp(c,"testfire",8)) {
                     TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
                 }
@@ -8621,6 +8624,8 @@ void fakedomovethings(void)
         short psect, psectlotag, tempsect, backcstat;
         char shrunk, spritebridge;
 
+        TestPredictBegin();     // test-only: -testpredict
+
         syn = (input *)&inputfifo[fakemovefifoplc&(MOVEFIFOSIZ-1)][myconnectindex];
 
         p = &ps[myconnectindex];
@@ -9048,6 +9053,8 @@ ENDFAKEPROCESSINPUT:
         fakemovefifoplc++;
 
         sprite[p->i].cstat = backcstat;
+
+        TestPredictEnd();       // test-only: -testpredict
 }
 
 

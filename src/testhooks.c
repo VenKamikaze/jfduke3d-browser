@@ -42,7 +42,9 @@ int TestSyncTic(int index)
 // machines disagreeing also finds which part of the state they disagree about:
 //   players   ps[] of every connected player: all of the simulation's fields, but not the ones that
 //             are a machine's own (palette pointer, gm, the on-screen message fta/ftq, zoom,
-//             visibility, the flash colour pals, refresh_inventory), and not the
+//             visibility, the flash colour pals, refresh_inventory, orotscrnang: displayrooms() writes it
+//             in OpenGL mode, scream_voice: the audio voice handle spritesound() returns, only ever
+//             given to FX_StopSound(); code-facts.md section 17), and not the
 //             kill statistics actors_killed / max_actors_killed (actors.c credits every kill to
 //             ps[myconnectindex], so they differ between machines: A1's list). The settings
 //             each player announces (packet 6: aim_mode, auto_aim, weaponswitch, ud.wchoice and
@@ -125,11 +127,10 @@ static void WalkState(emit_fn e)
         P(heat_amount); P(actorsqu); P(timebeforeexit); P(customexitsound);
         for (k = 0; k < 16; k++) { sprintf(nm, "weaprecs%d", k); E(PART_PLAYERS, i, nm, p->weaprecs[k]); }
         P(weapreccnt); P(interface_toggle_flag);
-        P(orotscrnang); P(rotscrnang); P(dead_flag); P(show_empty_weapon);
+        P(rotscrnang); P(dead_flag); P(show_empty_weapon);
         P(scuba_amount); P(jetpack_amount); P(steroids_amount); P(shield_amount);
         P(holoduke_on); P(pycount); P(weapon_pos); P(frag_ps);
         P(transporter_hold); P(last_full_weapon); P(footprintshade); P(boot_amount);
-        P(scream_voice);
         P(on_warping_sector); P(footprintcount);
         P(hbomb_on); P(jumping_toggle); P(rapid_fire_hold); P(on_ground);
         P(inven_icon); P(buttonpalette);
@@ -484,6 +485,84 @@ void TestLevelEnd(void)
         movefifoplc, more, movefifosendplc);
 }
 
+// ---- -testpredict (A1): prediction must not change the simulation -------------------------------------
+//
+// fakedomovethings() (game.c) predicts the local player's moves from the inputs not yet confirmed. It is
+// called from moveloop() and fakedomovethingscorrect() at any moment between tics, so it must leave every
+// bit of the real simulation as it found it (it writes the my* copies and, temporarily, the cstat of the
+// player's sprite). With -testpredict every call is checked: the raw bytes of every table the simulation
+// keeps (ps[], sprite[], hittype[], sector[], wall[], ud, the sprite lists, the random seed, ...) are hashed
+// just before and just after, and a difference is logged and counted. The raw bytes, not WalkState's
+// fields: even what the state hash leaves out as a machine's own must not be written by the prediction.
+
+static int TestPredictOn;
+static int PredictChecked, PredictChanged;
+static unsigned int PredictBefore[8];
+
+void TestPredictArg(void) { TestPredictOn = 1; }
+
+static unsigned int RawHash(const void *p, size_t n)
+{
+    const unsigned char *b = (const unsigned char *)p;
+    unsigned int h = HASH_INIT;
+    size_t i;
+
+    for (i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
+    return h;
+}
+
+static const char *PredictNames[8] = { "ps", "sprite", "hittype", "sector", "wall", "ud", "sprite lists", "scalars" };
+
+static void PredictHashAll(unsigned int *h)
+{
+    int scalars[8];
+    unsigned int lists = HASH_INIT, t;
+
+    h[0] = RawHash(ps, sizeof(ps));
+    h[1] = RawHash(sprite, sizeof(sprite));
+    h[2] = RawHash(hittype, sizeof(hittype));
+    h[3] = RawHash(sector, sizeof(sector));
+    h[4] = RawHash(wall, sizeof(wall));
+    h[5] = RawHash(&ud, sizeof(ud));
+#define L(a) do { t = RawHash(a, sizeof(a)); fnv_int(&lists, (int)t); } while (0)
+    L(headspritesect); L(prevspritesect); L(nextspritesect);
+    L(headspritestat); L(prevspritestat); L(nextspritestat);
+    L(spriteq); L(frags); L(po);
+#undef L
+    h[6] = lists;
+    scalars[0] = randomseed; scalars[1] = global_random; scalars[2] = numplayers;
+    scalars[3] = movefifoplc; scalars[4] = numsectors; scalars[5] = numwalls;
+    scalars[6] = spriteqloc; scalars[7] = animatecnt;
+    h[7] = RawHash(scalars, sizeof(scalars));
+}
+
+void TestPredictBegin(void)
+{
+    if (TestPredictOn) PredictHashAll(PredictBefore);
+}
+
+void TestPredictEnd(void)
+{
+    unsigned int after[8];
+    int i;
+    char what[160] = "";
+
+    if (!TestPredictOn) return;
+    PredictHashAll(after);
+    PredictChecked++;
+    for (i = 0; i < 8; i++)
+        if (after[i] != PredictBefore[i]) {
+            strcat(what, what[0] ? ", " : "");
+            strcat(what, PredictNames[i]);
+        }
+    if (what[0]) {
+        PredictChanged++;
+        if (PredictChanged <= 5)
+            buildprintf("TEST: prediction %d (fakemovefifoplc %d, movefifoplc %d) changed the simulation: %s\n",
+                PredictChecked, fakemovefifoplc, movefifoplc, what);
+    }
+}
+
 // ---- The hooks in domovethings() ---------------------------------------------------------------
 
 void TestTicHook(void)
@@ -531,6 +610,8 @@ static void TestQuitFinish(void)
     buildprintf("TEST: quitting after %d game tics: %d sync checks, %d mismatches, sync every %d tic%s, player %d of %d\n",
         movefifoplc, NetSyncChecks, NetSyncMismatches, TestSyncOn ? 1 : 8, TestSyncOn ? "" : "s",
         myconnectindex, numplayers);
+    if (TestPredictOn)
+        buildprintf("TEST: prediction: %d predicted moves checked, %d changed the simulation\n", PredictChecked, PredictChanged);
     if (TestDumpFile) fflush(TestDumpFile);
 
     // a player that is a few tics behind still needs what we send: keep acknowledging and

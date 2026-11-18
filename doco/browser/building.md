@@ -220,7 +220,7 @@ AllowSharewareNetGames = 1
 
 Registered data always allows them. The shareware licence ([3][D]) does not give permission for online multiplayer services, so shareware netplay is meant for a LAN. The examples above and all the tests pass the switch.
 
-**Test-only arguments** (after `--`; `src/testhooks.h`): `-testquit<N>` quit with status 0 after the N-th tic of the level (also in single player and demo playback), `-testsync` a sync byte of the whole state every tic (every player must use it), `-testnudge<T>` move this player 8 units at tic T (a desync on purpose), `-testdump<name>` write a 32 byte record per tic to `<name>` (read it with `tests/tools/testdump.py`), `-teststate[<T>]` also `<name>.state`, the state as text. A run with `-testquit` ends by itself; `scripts/run-headless.sh` runs one and returns the game's status.
+**Test-only arguments** (after `--`; `src/testhooks.h`): `-testquit<N>` quit with status 0 after the N-th tic of the level (also in single player and demo playback), `-testsync` a sync byte of the whole state every tic (every player must use it), `-testnudge<T>` move this player 8 units at tic T (a desync on purpose), `-testdump<name>` write a 32 byte record per tic to `<name>` (read it with `tests/tools/testdump.py`), `-teststate[<T>]` also `<name>.state`, the state as text, `-testexit<T>` end the first level at tic T (every player must have it), `-teststall<T>,<ms>` stop this machine for `<ms>` ms at tic T of the first level, `-testfire[<N>]` hold fire with the chaingun and walk about from tic N (every player must have it), `-testpredict` check that the prediction never changes the simulation (A1). A run with `-testquit` ends by itself; `scripts/run-headless.sh` runs one and returns the game's status.
 
 Tests (all local, on 127.0.0.1, ports from `JFDUKE3D_TEST_PORT_BASE`, default 47400; they build the relay with Go into `~/.cache/jfduke3d-browser` the first time; each stops every process it started; keep `JFDUKE3D_TEST_KEEP=1` to keep a test's directory, `JFDUKE3D_TEST_VERBOSE=1` for the logs of a failing game):
 
@@ -229,9 +229,11 @@ make test                      # everything below, about 20 minutes
 make test-mmulti               # mmulti over vnet with impairment, 10 runs (no game data needed), about 2 minutes
 make test-net GAME_RUNS=3      # the rest; needs testdata/duke3dshare.grp
 tests/net/test-mmulti-vnet.sh --runs 10 [--stub-resend]       # mmulti over vnet with loss, duplication, reordering
-tests/net/test-three-games.sh [--udp] [--players N] [--tics N] [--impair SPEC] [--nudge N:T] [--no-testsync]   # N game processes, co-op, quit after N tics, every -testdump the same
+tests/net/test-three-games.sh [--udp] [--players N] [--tics N] [--impair SPEC] [--nudge N:T] [--no-testsync] [--nosound N] [--fire]   # N game processes, co-op, quit after N tics, every -testdump the same
 tests/net/test-desync.sh [--game FILE]                        # a -testnudge is logged and shows in -testdump, with and without -testsync
 tests/net/test-player-announce.sh [--game FILE] [--only relay-3|relay-4|udp-3]   # D1: every machine holds every player's announced settings (a different configuration for each player), dumps equal
+tests/net/test-level-exit.sh [--game FILE] [--runs N] [--only NAME]   # D5, D6: the level ends at tic 200 with a machine stopped for 1.5 s: every machine plays 200 tics, all leave, dumps and states equal (relay-slave, relay-master, relay-3, udp-slave, udp-master, udp-3)
+tests/net/test-predict-pure.sh [--game FILE]                  # A1: -testpredict on every machine: the prediction never changes the simulation
 tests/net/test-single.sh [--game FILE] [--tics N]             # -testquit and -testdump in single player and demo playback
 tests/net/test-udp-unchanged.sh --base-game "$(tests/net/build-baseline.sh)" [--mutate-wire]   # plain -net against the pre-brief build
 tests/net/test-errors.sh [--only REGEX] [--game FILE]         # bad code, full room, relay down, host leaves, caps
