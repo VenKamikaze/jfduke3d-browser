@@ -799,6 +799,7 @@ void faketimerhandler()
             if (movefifoend[i] < movefifoend[myconnectindex]-200) return;
 
      getinput(myconnectindex);
+     TestInputHook();   // test-only: -testfire
 
      avgfvel += loc.fvel;
      avgsvel += loc.svel;
@@ -991,7 +992,16 @@ void faketimerhandler()
             return;
         }
 
-    while (1)  //Master
+    sendmasterpackets(0x7fffffff);
+}
+
+     //Master: send the slaves the inputs of the tics before tic UPTO that every player has an input for
+void sendmasterpackets(int upto)
+{
+    int i, j, k;
+    input *osyn, *nsyn;
+
+    while (movefifosendplc < upto)  //Master
     {
         for(i=connecthead;i>=0;i=connectpoint2[i])
             if (playerquitflag[i] && (movefifoend[i] <= movefifosendplc)) return;
@@ -7022,6 +7032,18 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"teststate",9)) {
                     TestStateArg(atoi(c+9));    // test-only: with -testdump, the state as text
                 }
+                else if (!Bstrncasecmp(c,"testexit",8)) {
+                    TestExitArg(atoi(c+8));     // test-only: every machine ends the first level at tic T
+                }
+                else if (!Bstrncasecmp(c,"teststall",9)) {
+                    TestStallArg(c+9);          // test-only: this machine stops for a while at tic T of the first level
+                }
+                else if (!Bstrcasecmp(c,"testpredict")) {
+                    TestPredictArg();           // test-only: check that the prediction never changes the simulation
+                }
+                else if (!Bstrncasecmp(c,"testfire",8)) {
+                    TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
+                }
                 else if (!Bstrcasecmp(c,"name")) {
                     if (argc > i+1) {
                         CommandName = argv[i+1];
@@ -8130,7 +8152,14 @@ if (VOLUMEONE) {
         {
             if( ps[myconnectindex].gm&MODE_EOL )
             {
+                TestLevelEnd();     // test-only: -testexit, -teststall
                 closedemowrite();
+
+                // The master sends the slaves the inputs of the tics when it has them, which can be after
+                // it has played them. The slaves need every tic up to the one that ended the level to
+                // end it too: send what is still owed before the master stops sending (ready2send = 0).
+                if (numplayers > 1 && networkmode == 0 && myconnectindex == connecthead)
+                    sendmasterpackets(movefifoplc);
 
                 ready2send = 0;
 
@@ -8545,6 +8574,11 @@ char moveloop()
             if (movefifoplc == movefifoend[i]) break;
         if (i >= 0) break;
         if( domovethings() ) return 1;
+
+        // A tic that ends the level is the last tic of it. Every machine runs that same tic, but not
+        // the same number of tics after it: it depends on how many inputs each has queued by then.
+        // The player state carried into the next level (ammo, weapons, health) would then differ.
+        if( ps[myconnectindex].gm&MODE_EOL ) break;
     }
     return 0;
 }
@@ -8589,6 +8623,8 @@ void fakedomovethings(void)
         unsigned int sb_snum;
         short psect, psectlotag, tempsect, backcstat;
         char shrunk, spritebridge;
+
+        TestPredictBegin();     // test-only: -testpredict
 
         syn = (input *)&inputfifo[fakemovefifoplc&(MOVEFIFOSIZ-1)][myconnectindex];
 
@@ -9017,6 +9053,8 @@ ENDFAKEPROCESSINPUT:
         fakemovefifoplc++;
 
         sprite[p->i].cstat = backcstat;
+
+        TestPredictEnd();       // test-only: -testpredict
 }
 
 
