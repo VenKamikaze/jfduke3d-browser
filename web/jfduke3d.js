@@ -1,29 +1,38 @@
-// Page glue for the browser build of JFDuke3D (brief 02).
+// Page glue for the browser build of JFDuke3D (briefs 02 and 03).
 //
 // Runs before duke3d.js: it defines Module (Emscripten's configuration object), then
 // drives the start-up: mount the persistent folder, put the game data in place,
 // wait for the "Click to start" click (browsers only allow sound after one), run
 // main, and say so on the page if the game ends or crashes.
 //
-// This page is jfSW's page (jfsw-browser, web/jfsw.js, as of brief 02c) without what later briefs bring: the data download
-// and cache (brief 03), the network lobby and the host/join parameters (brief 05) and the data-mismatch notice (05b). The
+// This page is jfSW's page (jfsw-browser, web/jfsw.js, as of brief 02c, with its brief 03's game data download) without what
+// later briefs bring: the network lobby and the host/join parameters (brief 05) and the data-mismatch notice (05b). The
 // names are jfSW's on purpose (Module.jfsw*, window.jfsw*, JFSW_CONFIG): the engine (jfbuild, shared with jfSW) calls the
 // Module.jfsw* hooks, and the browser tests of both games read the same globals.
 //
 // Query string:
-//   ?data=<url>   fetch the GRP from this URL instead of the default, a same-origin duke3dshare.grp next to the page
-//                 (this brief's dev data loader: no cache, no check; brief 03 replaces it). The game recognises the
-//                 file by its CRC32 as it always does, and says so and exits if it is not a GRP it knows.
+//   ?data=<url>   fetch the GRP from this URL instead of the one in config.js (size and CRC32 of config.js
+//                 are then not checked; the file must still be a GRP the game knows). Outside test mode only a URL on
+//                 the page's own origin is taken; another is ignored with a console warning.
 //   ?test=1       test hooks (below), only when config.js has testMode: true (a link alone cannot turn them on).
 //                 Nothing else here reads the other options.
 //   ?args=...     game arguments, space separated (test only), e.g. "-v1 -l1 -s1".
 //   ?files=a,b    URLs of files to put in the game's directory before main (test only). The only way a loose file (a
-//                 CON script, say) gets into the game's folder: a loose file overrides the same file in the GRP.
+//                 CON script, say) gets into the game's folder, and only in test mode, where the page also passes the
+//                 game -testloosecon so that a loose CON script is read (otherwise the game takes its CON scripts from
+//                 the GRP only: a loose GAME.CON would override the GRP's and change the simulation).
 //   ?persist=0    keep the game's directory in memory only (test only).
+//   ?loosecon=0   do not pass -testloosecon (test only): the game then reads its CON scripts from the GRP only, as for a visitor,
+//                 even with ?files= (the tests use it to show the game ignores a loose script).
 //   ?idb=off      every IndexedDB open fails, as in an old private window (test only).
+//   ?idb=quota    storing the game data in the cache fails with a QuotaExceededError (test only).
+//   ?stall=<ms>   how long without a byte before a download is called stalled (default 30000; test only).
+//   ?revalidate=1|0  overrides config.js's `revalidate` (test only).
 //
-// The game data: this file fetches the GRP and writes it to /data/duke3d.grp, a folder that is not persisted and is the
-// game's DATADIR.
+// The game data (brief 03): data.js downloads and checks the GRP, keeps it in its own IndexedDB cache and
+// hands the bytes here; this file writes them to /data/duke3d.grp with a stable modification time (so the game's
+// own grpfiles.cache, kept in /persist, recognises the file and the game does not checksum it again) and
+// shows the progress, the messages and the "use your own copy" picker.
 //
 // Test hooks, with ?test=1: window.jfswTest = { FS, readFile(name), writeFile(name, bytes),
 // listFiles(), start(), passUnlockedMouse (set it true to let mouse motion reach the game while the pointer
@@ -40,7 +49,7 @@
   var TEST = params.get('test') === '1' && !!(window.JFSW_CONFIG && window.JFSW_CONFIG.testMode === true);
   var PERSIST = !(TEST && params.get('persist') === '0');
   if (TEST && params.get('idb') === 'off') {
-    // Test hook: what an old Firefox private window did: opening a database fails (for the game's IDBFS; brief 03's data cache will use it too).
+    // Test hook: what an old Firefox private window did: opening a database fails (for the game's IDBFS and the data cache).
     var failing = function () {
       var req = {};
       setTimeout(function () {
@@ -52,14 +61,30 @@
     Object.defineProperty(window, 'indexedDB', { configurable: true, value: { open: failing, deleteDatabase: failing, cmp: function () { return 0; } } });
   }
   var storageNote = '';
+  var CFG = (window.JFSW_CONFIG && window.JFSW_CONFIG.data) || {};
+  // Decision D14: with the shareware data the game refuses network games unless this is on. Only config.js can turn it
+  // on (never the address) and only for a deployment that is a LAN; it adds -allowsharewarenet to the game's arguments.
+  var ALLOW_SHAREWARE_NET = !!(window.JFSW_CONFIG && window.JFSW_CONFIG.allowSharewareNetGames === true);
 
-  var DATA_OVERRIDE = params.get('data');
-  var DATA_URL = DATA_OVERRIDE || 'duke3dshare.grp';
+  // ?data=: outside test mode only a URL on this page's own origin (resolved against the address) is taken; another is ignored.
+  // A link must not be able to make a visitor's page fetch and run a game from somewhere else, and the cache and the picker are
+  // for the configured file. (Test mode needs a cross-origin one for the CORS checks.)
+  var DATA_OVERRIDE = (function () {
+    var d = params.get('data');
+    if (!d) { return null; }
+    if (TEST) { return d; }
+    try {
+      if (new URL(d, location.href).origin === location.origin) { return d; }
+    } catch (e) { /* not a URL */ }
+    console.warn('?data= ignored: outside test mode it must be a URL on this page\'s own origin (' + d + ')');
+    return null;
+  })();
   var DATA_DIR = '/data';        // on the game's search path (DATADIR in the Makefile); not persisted
   var HOME_DIR = '/persist';     // the game's current directory: duke3d.cfg, saves, duke3d.log; IndexedDB
   var GRP_NAME = 'duke3d.grp';
   var CLOSE_DELAY_MS = 10;       // after a file written by the game is closed, wait this long, then write to IndexedDB
   // Files the game rewrites at every start or all the time, which are not worth a write to IndexedDB on their own.
+  // (grpfiles.cache is one of them, but it must reach IndexedDB once, with the checksum of the GRP: see cacheChanged().)
   function quietFile(name) { return name === 'duke3d.log' || name === 'grpfiles.cache' || name.indexOf('symbols missing') >= 0; }
 
   var canvas = document.getElementById('canvas');
@@ -69,6 +94,11 @@
   var startBtn = document.getElementById('start');
   var reloadBtn = document.getElementById('reload');
   var retryBtn = document.getElementById('retry');
+  var dataInfoEl = document.getElementById('datainfo');
+  var dataCtl = document.getElementById('datactl');
+  var pickInput = document.getElementById('pick');
+  var redownloadBtn = document.getElementById('redownload');
+  var useDownloadBtn = document.getElementById('usedownload');
   var helpEl = document.getElementById('help');
   var testInfoEl = document.getElementById('testinfo');
 
@@ -79,7 +109,7 @@
 
   window.jfswOut = [];
   window.jfswErr = [];
-  window.jfswState = 'loading';   // loading, needdata (the game data could not be fetched: retry), ready, running, ended, error
+  window.jfswState = 'loading';   // loading, needdata (no usable game data: pick a file or retry), ready, running, ended, error
   window.jfswSyncs = 0;           // completed writes to IndexedDB
 
   function setState(s) { window.jfswState = s; }
@@ -100,6 +130,7 @@
     progressEl.hidden = true;
     startBtn.hidden = true;
     retryBtn.hidden = true;
+    dataCtl.hidden = true;
     reloadBtn.hidden = false;
     showStatus(message, isError);
     reloadBtn.focus();
@@ -227,15 +258,27 @@
   }
 
   var lastSignature = '';
+  var persistedCache = null;      // the text of grpfiles.cache as last written to IndexedDB (or loaded from it)
   var writing = false;
   var current = Promise.resolve();
   var queued = null;
   var syncTimer = 0;
   var closeTimer = 0;
 
+  // The game's list of the GRPs it has checksummed. It is written at every start, with the same text when nothing changed, so it
+  // does not count as a change of the folder; but the start that checksums the GRP changes it, and that text must be kept, or the
+  // next visit checksums the GRP again. Nothing else need write to the folder in that first visit (duke3d.cfg is written only when
+  // the menu is left or the game ends, code-facts 16.8), and jfSW's page, which leaves this file out, relies on sw.cfg being written
+  // at every start: tests/web/data.js (sabotage nocachesync) shows a first visit that only reaches the menu writes nothing without this.
+  function cacheText() {
+    try { return String.fromCharCode.apply(null, FS.readFile(HOME_DIR + '/grpfiles.cache')); } catch (e) { return null; }
+  }
+  function cacheChanged() { return cacheText() !== persistedCache; }
+
   function run() {
     writing = true;
     lastSignature = persistSignature();
+    persistedCache = cacheText();
     current = syncfs(false).then(function () { window.jfswSyncs++; writing = false; },
       function (e) { writing = false; console.warn('Saving to the browser failed:', e); throw e; });
     return current;
@@ -252,11 +295,12 @@
     }
     return queued;
   }
-  function syncIfChanged() { if (persistSignature() !== lastSignature) { syncNow().catch(function () {}); } }
+  function syncIfChanged() { if (persistSignature() !== lastSignature || cacheChanged()) { syncNow().catch(function () {}); } }
 
   function startSyncing() {
     if (!PERSIST) { return; }
     lastSignature = persistSignature();
+    persistedCache = cacheText();
     // The game writes its files with plain C file calls. Watch the closes of files opened for writing in
     // the persisted folder (a save game, duke3d.cfg) and write to IndexedDB a moment after the last one.
     var realClose = FS.close;
@@ -264,7 +308,8 @@
       var path = stream && stream.path;
       var wrote = stream && (stream.flags & 3) !== 0;
       var r = realClose.apply(FS, arguments);
-      if (wrote && path && path.indexOf(HOME_DIR + '/') === 0 && !quietFile(path.substr(HOME_DIR.length + 1))) {
+      if (wrote && path && path.indexOf(HOME_DIR + '/') === 0 && (!quietFile(path.substr(HOME_DIR.length + 1)) ||
+          (path === HOME_DIR + '/grpfiles.cache' && cacheChanged()))) {
         clearTimeout(closeTimer);
         closeTimer = setTimeout(function () { syncNow().catch(function () {}); }, CLOSE_DELAY_MS);
       }
@@ -305,44 +350,131 @@
   }
 
   // ---- Game data --------------------------------------------------------------------------------------
-  // This brief's dev data loader: fetch the GRP (no cache, no check) and write it where the game looks. Brief 03 replaces it
-  // with jfSW's data.js (download, checks, an IndexedDB cache, "use your own copy").
 
-  var prepared = false;       // the game data is in place and the page is otherwise ready
+  var prepared = false;       // the first game data is in place and the page is otherwise ready
+  var gen = 0;                // each acquire() has a number; the answer of an older one (cancelled by a pick) is ignored
+  var loadCtl = null;
 
-  function writeGrp(bytes) {
-    var path = DATA_DIR + '/' + GRP_NAME;
-    FS.writeFile(path, bytes);
-    // The game keeps (name, size, mtime, CRC32) of the GRPs it has seen in grpfiles.cache and checksums a file again
-    // when one of them differs; this file is new every time, so it is checksummed on every start (a fraction of a second).
+  function dataOptions(extra) {
+    return Object.assign({
+      url: DATA_OVERRIDE || CFG.url || 'duke3dshare.grp',
+      size: DATA_OVERRIDE ? 0 : (CFG.size || 0),
+      crc32: DATA_OVERRIDE ? '' : (CFG.crc32 || ''),
+      revalidate: (TEST && params.has('revalidate')) ? params.get('revalidate') === '1' : !!CFG.revalidate,
+      hooks: { quota: TEST && params.get('idb') === 'quota' },
+      stallMs: TEST && params.has('stall') ? +params.get('stall') : 30000,
+      keepUrls: DATA_OVERRIDE ? [CFG.url || 'duke3dshare.grp'] : [],
+      onProgress: onDataProgress,
+      onStatus: function (t) { showStatus(t); }
+    }, extra || {});
   }
 
-  function acquire() {
-    setState('loading');
-    startBtn.hidden = true;
-    retryBtn.hidden = true;
+  var lastDraw = 0;
+  function onDataProgress(got, total) {
+    if (TEST) { window.jfswDownloadLog.push({ got: got, total: total, t: Math.round(performance.now()) }); }
+    var now = performance.now();
+    if (now - lastDraw < 40 && (!total || got < total)) { return; }
+    lastDraw = now;
+    progressEl.hidden = false;
+    if (total) {
+      progressEl.max = 100;
+      progressEl.value = 100 * got / total;
+      showStatus('Downloading the game data: ' + JfswData.mb(got) + ' of ' + JfswData.mb(total) + ' (' + Math.floor(100 * got / total) + '%)');
+    } else {
+      progressEl.removeAttribute('value');      // indeterminate: the total is not known (or the response is compressed)
+      showStatus('Downloading the game data: ' + JfswData.mb(got));
+    }
+  }
+
+  function setControls(on, opts) {
+    opts = opts || {};
+    dataCtl.hidden = !on;
+    pickInput.disabled = !on;
+    redownloadBtn.hidden = !(on && opts.redownload);
+    useDownloadBtn.hidden = !(on && opts.useDownload);
+  }
+
+  function writeGrp(res) {
+    var path = DATA_DIR + '/' + GRP_NAME;
+    FS.writeFile(path, res.bytes);
+    // A modification time that only changes when the data does: the game keeps (name, size, mtime, CRC32)
+    // in grpfiles.cache and only checksums the 11 MB (or the 44 MB of a registered GRP) again when one of them differs.
+    var ms = Math.floor(res.storedAt / 1000) * 1000;
+    FS.utime(path, ms, ms);
+  }
+
+  function describeData(res) {
+    var size = JfswData.mb(res.size);
+    if (res.source === 'local') { return 'Game data: ' + res.name + ', your own copy (' + (res.fileName || 'picked file') + ', ' + size + ').' + (res.cached ? ' It is kept in this browser.' : ''); }
+    var where = res.url.replace(/^https?:\/\//, '').replace(/\?.*$/, '');
+    if (res.from === 'network') { return 'Game data: ' + res.name + ', downloaded just now from ' + where + ' (' + size + ').' + (res.cached ? ' It is kept in this browser.' : ''); }
+    return 'Game data: ' + res.name + ', downloaded ' + new Date(res.storedAt).toLocaleString() + ' from ' + where + ' (' + size + '), kept in this browser' +
+      (res.from === 'revalidated' ? ' (the server says it is still current).' : '.');
+  }
+
+  var preparing = null;       // finishPrepare() once started: a second load (the picker) must not run it again
+
+  function dataReady(res, mine) {
+    writeGrp(res);
+    window.jfswData = { source: res.source, from: res.from, name: res.name, size: res.size, crc: res.crc, cached: res.cached, notes: res.notes, crcMs: res.crcMs, downloadMs: res.downloadMs, storedAt: res.storedAt };
+    dataInfoEl.hidden = false;
+    dataInfoEl.textContent = describeData(res);
     progressEl.hidden = true;
-    showStatus('Loading game data...');
-    return fetchBytes(DATA_URL, 'Game data').then(function (bytes) {
-      writeGrp(bytes);
-      progressEl.hidden = true;
-      return prepared ? Promise.resolve() : finishPrepare();
-    }).then(function () {
+    setControls(true, { redownload: res.source === 'download', useDownload: res.source === 'local' });
+    var after = prepared ? Promise.resolve() : (preparing || (preparing = finishPrepare().catch(function (e) { preparing = null; throw e; })));
+    return after.then(function () {
       prepared = true;
-      showStatus('Ready.' + (storageNote ? storageNote : ''), !!storageNote);
+      if (mine !== gen) { return; }        // another load (the picker) started while the test files came: it decides the state
+      var notes = res.notes.join(' ');
+      showStatus('Ready.' + (storageNote ? storageNote : '') + (notes ? ' ' + notes : ''), !!(storageNote || notes));
       startBtn.hidden = false;
       startBtn.focus();
       setState('ready');
-    }, function (e) {
-      window.jfswDataError = { message: describe(e) };
-      progressEl.hidden = true;
-      startBtn.hidden = true;
-      showStatus('The game data could not be loaded: ' + sentence(describe(e)) + '\nThe game has not been started. You can try again.', true);
-      retryBtn.hidden = false;
-      setState('needdata');
     });
   }
+
+  function dataFailed(e) {
+    window.jfswDataError = { kind: e && e.kind, message: describe(e), size: e && e.size, crc: e && e.crc };
+    progressEl.hidden = true;
+    startBtn.hidden = true;
+    dataInfoEl.hidden = true;
+    var text = (e && e.name === 'DataError') ? e.message : 'The game data could not be loaded: ' + describe(e);
+    showStatus(text + '\nThe game has not been started. You can try again, or use your own copy of the game data (a .grp file).', true);
+    retryBtn.hidden = false;
+    setControls(true, {});
+    setState('needdata');
+  }
+
+  // Gets the game data (downloading it, or from the cache, or from a picked file) and puts it where the game looks.
+  // A new call cancels the one before (picking a file while a download runs).
+  function acquire(extra) {
+    if (loadCtl) { loadCtl.abort(); }
+    var ctl = loadCtl = new AbortController();
+    var mine = ++gen;
+    setState('loading');
+    startBtn.hidden = true;
+    retryBtn.hidden = true;
+    setControls(true, {});          // the picker stays usable: it cancels a download that is slow or stuck
+    progressEl.hidden = true;
+    dataInfoEl.hidden = true;
+    showStatus('Loading game data...');
+    return JfswData.load(dataOptions(Object.assign({ signal: ctl.signal }, extra))).then(function (res) {
+      if (mine === gen) { return dataReady(res, mine); }
+    }, function (e) {
+      if (mine === gen) { dataFailed(e); }
+    }).then(function () { if (mine === gen) { loadCtl = null; } }, function (e) {
+      if (mine === gen) { loadCtl = null; finish('Could not start: ' + describe(e), true); }
+    });
+  }
+
   retryBtn.addEventListener('click', function () { acquire(); });
+  redownloadBtn.addEventListener('click', function () { if (window.jfswState === 'ready') { acquire({ force: true }); } });
+  useDownloadBtn.addEventListener('click', function () { if (window.jfswState === 'ready') { acquire({ useDownload: true }); } });
+  pickInput.addEventListener('change', function () {
+    var file = pickInput.files && pickInput.files[0];
+    pickInput.value = '';
+    if (file && ['ready', 'needdata', 'loading'].indexOf(window.jfswState) >= 0 && FS) { acquire({ file: file }); }
+  });
 
   function prepare() {
     FS = Module.FS;
@@ -368,13 +500,21 @@
     });
   }
 
+  // Loose game files: the only ones are the test files of ?files=, and only in test mode. A loose file in the game's
+  // folder overrides the same file in the GRP, so a visitor's game must never get one (D8: CON scripts come from the GRP only;
+  // the game, too, reads only the GRP's CON scripts unless it is given -testloosecon, which only test mode passes).
+  function writeLooseFile(name, bytes) {
+    if (!TEST) { throw new Error('a loose game file is not written outside test mode: ' + name); }
+    FS.writeFile(HOME_DIR + '/' + name, bytes);
+  }
+
   // After the first game data is in place: the test files, then the syncing of /persist.
   function finishPrepare() {
     var files = TEST ? (params.get('files') || '').split(',').filter(Boolean) : [];
     if (files.length && PERSIST) { return Promise.reject(new Error('?files= puts files in the game\'s folder, which is saved to IndexedDB: add persist=0')); }
     return files.reduce(function (p, url) {
       return p.then(function () {
-        return fetchBytes(url, 'Test file').then(function (b) { FS.writeFile(HOME_DIR + '/' + url.split('/').pop().split('?')[0], b); });
+        return fetchBytes(url, 'Test file').then(function (b) { writeLooseFile(url.split('/').pop().split('?')[0], b); });
       });
     }, Promise.resolve()).then(function () {
       startSyncing();
@@ -383,9 +523,14 @@
 
   // ---- Running ----------------------------------------------------------------------------------------
 
+  // The arguments main is given. Outside test mode only what config.js asks for: -allowsharewarenet (D14). In test mode,
+  // -testloosecon (a loose CON script is read), then the ?args= of the test.
   function gameArgs() {
-    if (!TEST) { return []; }
-    return [].concat((params.get('args') || '').split(/\s+/).filter(Boolean));
+    var a = [];
+    if (ALLOW_SHAREWARE_NET) { a.push('-allowsharewarenet'); }
+    if (!TEST) { return a; }
+    if (params.get('loosecon') !== '0') { a.push('-testloosecon'); }
+    return a.concat((params.get('args') || '').split(/\s+/).filter(Boolean));
   }
 
   function start() {
@@ -399,7 +544,9 @@
     fit();
     try {
       // The click is the user gesture that lets the game open its audio device.
-      Module.callMain(gameArgs());
+      var args = gameArgs();
+      window.jfswArgs = args.slice();                       // what the game was started with (the tests read it; callMain adds the program name to its own copy)
+      Module.callMain(args);
     } catch (e) {
       if (e === 'unwind') { return; }                       // ASYNCIFY suspended main, as it should
       if (e && e.name === 'ExitStatus') { return; }         // exit(), reported by onExit
@@ -523,6 +670,7 @@
     Module.jfswOwedLog = capped([], 50000);     // ms each hidden yield lasted that was entered with data held back by mmulti's send window
     Module.jfswWakes = 0;                   // how often vnet's wake callback fired (sdlayer2.c)
     Module.jfswHiddenLog = capped([], 50000);   // why each hidden-tab yield ended: 1 a network event, 2 the page became visible, 0 the timer
+    window.jfswDownloadLog = [];            // every progress report of the data download
     testInfoEl.hidden = false;
     testInfoEl.textContent = 'test mode: args=' + JSON.stringify(gameArgs()) + ' persist=' + PERSIST;
     window.jfswTest = {

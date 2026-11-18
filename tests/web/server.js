@@ -11,12 +11,16 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '
 
 // The build's config.js as the tests serve it (brief 05 review): test mode on (testMode: true, which the page needs
 // besides ?test=1), and o.relay as the relay when given. o.testMode false: the file as a public site has it.
+// o.allowSharewareNetGames true: the shareware network gate opened in config.js (brief 03).
 function configText(root, o) {
   o = o || {};
   let text = fs.readFileSync(path.join(root, 'config.js'), 'utf8');
-  if (!/testMode: false,/.test(text) || !/relay: '',/.test(text)) { throw new Error(root + '/config.js has no "testMode: false," or "relay: \'\'," to change'); }
+  if (!/testMode: false,/.test(text) || !/relay: '',/.test(text) || !/allowSharewareNetGames: false,/.test(text)) {
+    throw new Error(root + '/config.js has no "testMode: false,", "relay: \'\'," or "allowSharewareNetGames: false," to change');
+  }
   if (o.testMode !== false) { text = text.replace('testMode: false,', 'testMode: true,'); }
   if (o.relay) { text = text.replace("relay: '',", 'relay: ' + JSON.stringify(o.relay) + ','); }
+  if (o.allowSharewareNetGames) { text = text.replace('allowSharewareNetGames: false,', 'allowSharewareNetGames: true,'); }
   return text;
 }
 

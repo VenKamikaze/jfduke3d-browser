@@ -68,6 +68,7 @@ char const *confilename = defaultconfilename;
 char boardfilename[BMAX_PATH] = {0};
 unsigned char waterpal[768], slimepal[768], titlepal[768], drealms[768], endingpal[768];
 char firstdemofile[80] = { '\0' };
+extern int LooseConAllowed;   // gamedef.c: -testloosecon
 
 static int netparam = 0;    // Index into argv of the first -net argument
 static int endnetparam = 0; // Index into argv following the final -net parameter.
@@ -7016,6 +7017,9 @@ void checkcommandline(int argc, char const * const *argv)
                 }
                 else if (!Bstrcasecmp(c,"allowsharewarenet")) {
                     AllowSharewareNetCmd = 1;   // D14: allow net games with the shareware GRP (netgame.h)
+                }
+                else if (!Bstrcasecmp(c,"testloosecon")) {
+                    LooseConAllowed = 1;        // test-only: CON scripts may come from disk (the browser build reads only the GRP's; gamedef.c)
                 }
                 else if (!Bstrncasecmp(c,"testquit",8)) {
                     TestQuitArg(atoi(c+8));     // test-only (testhooks.h): quit cleanly after N game tics

@@ -166,14 +166,19 @@ else
 all: duke3d$(EXESUFFIX) build$(EXESUFFIX)
 endif
 
-# Browser tests (brief 02; they need scripts/build-wasm.sh and scripts/fetch-test-data.sh first, see
+# Browser tests (briefs 02 and 03; they need scripts/build-wasm.sh and scripts/fetch-test-data.sh first, see
 # doco/browser/building.md section 6.4). tests/web/firefox.js is optional and not run here.
 .PHONY: test-web
 test-web:
+	node tests/web/grptable.js
+	node tests/web/data.js
+	node tests/web/con.js
 	node tests/web/smoke.js
 	node tests/web/persist.js
 	node tests/web/focus.js
 	node tests/web/loops.js
+	# determinism.js needs the native ./duke3d (make) and builds a clang copy of it (tests/tools/build-native-clang.sh)
+	node tests/web/determinism.js
 	# frametime.js fails in the cloud container (stalls over 100 ms in a software-rendered Chromium): see its header
 	node tests/web/frametime.js
 
