@@ -31,45 +31,7 @@ const SABOTAGE_NOQUIT = SAB === 'noquit';                 // the quit's Y is nev
 // A key the game's polling loops are sure to see, unless the nokey sabotage is on.
 async function key(page, k, ms) { if (!SABOTAGE_NOKEY) { await t.tap(page, k, ms); } else { await page.waitForTimeout((ms || 200)); } }
 
-// The main menu's cursor: a spinning nuke symbol left of the items (New Game, Options, Load Game, How to Order, Credits,
-// Quit; 58 page pixels apart in a 1000x800 window). Finds the row it is on from one screenshot of the cursor column: the
-// band with the light pixels of the symbol (none at all when it is edge-on: the answer is then 0, unknown).
-const COLUMNS = [{ x: 120, y: 203, width: 100, height: 348 }, { x: 790, y: 203, width: 100, height: 348 }];   // left and right symbol
-function cursorFinder(page, decoder) {
-  const bands = async (clip) => {
-    const png = await page.screenshot({ clip, type: 'png' });
-    return decoder.evaluate(async (data) => {
-      const bmp = await createImageBitmap(await (await fetch('data:image/png;base64,' + data)).blob());
-      const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
-      const g = c.getContext('2d'); g.drawImage(bmp, 0, 0);
-      const px = g.getImageData(0, 0, c.width, c.height).data;
-      const n = [0, 0, 0, 0, 0, 0];
-      for (let i = 0; i < px.length; i += 4) {
-        if (px[i] + px[i + 1] + px[i + 2] > 330) { n[Math.min(5, Math.floor(Math.floor(i / 4 / c.width) / 58))]++; }
-      }
-      return n;
-    }, png.toString('base64'));
-  };
-  // One symbol alone is not proof of the menu (the title screen has light pixels there too): both symbols must be on the same row,
-  // each with a few hundred light pixels at most and the rest of its column nearly dark.
-  const once = async () => {
-    const rows = [];
-    let text = '';
-    for (const col of COLUMNS) {
-      const counts = await bands(col);
-      const best = counts.indexOf(Math.max(...counts));
-      const others = counts.reduce((a, c, i) => (i === best ? a : a + c), 0);
-      rows.push(counts[best] >= 40 && counts[best] < 600 && counts[best] > 3 * others ? best + 1 : 0);
-      text += (text ? ' | ' : '') + counts.join(',');
-    }
-    return { row: rows[0] && rows[0] === rows[1] ? rows[0] : 0, counts: text };
-  };
-  return async () => {     // a few looks, so that an edge-on symbol does not count
-    let r = { row: 0, counts: '' };
-    for (let k = 0; k < 6 && !r.row; k++) { r = await once(); if (!r.row) { await page.waitForTimeout(60); } }
-    return r;
-  };
-}
+const { cursorFinder } = t;   // lib.js: finds the main menu's cursor row
 
 async function main() {
   const env = await t.start(PORT);
