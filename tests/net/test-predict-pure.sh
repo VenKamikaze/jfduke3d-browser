@@ -61,7 +61,7 @@ run() {   # NAME MODE PLAYERS
         checked="$(echo "$line" | sed -n 's/^TEST: prediction: \([0-9]*\) predicted moves checked, \([0-9]*\) changed.*/\1/p')"
         changed="$(echo "$line" | sed -n 's/^TEST: prediction: \([0-9]*\) predicted moves checked, \([0-9]*\) changed.*/\2/p')"
         t_check "$name: player $n checked ${checked:-?} predicted moves (at least 400) and ${changed:-?} changed the simulation (want 0)" test "${checked:-0}" -ge 400 -a "${changed:-1}" -eq 0
-        t_check "$name: player $n logged no change of the simulation by the prediction" bash -c "! grep -q 'changed the simulation:' '$log'"
+        t_check "$name: player $n logged no change of the simulation by the prediction ($(grep -h 'changed the simulation:' "$log" | head -2 | sed 's/^TEST: //' | tr '\n' ';'))" bash -c "! grep -q 'changed the simulation:' '$log'"
         t_check "$name: player $n logged no desync" bash -c "! grep -q 'OUT OF SYNC' '$log'"
         [ "$n" -gt 0 ] && t_check "$name: player $n's -testdump is the same as the host's" cmp -s "$d/p0/d.bin" "$d/p$n/d.bin"
     done

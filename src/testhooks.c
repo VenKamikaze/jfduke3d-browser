@@ -515,12 +515,17 @@ static const char *PredictNames[8] = { "ps", "sprite", "hittype", "sector", "wal
 
 static void PredictHashAll(unsigned int *h)
 {
-    int scalars[8];
+    int scalars[8], i;
     unsigned int lists = HASH_INIT, t;
 
     h[0] = RawHash(ps, sizeof(ps));
     h[1] = RawHash(sprite, sizeof(sprite));
-    h[2] = RawHash(hittype, sizeof(hittype));
+    // not the entries of the ambient sound sprites: the audio callback (sounds.c testcallback(), run by the
+    // audio thread when a sound ends) writes their temp_data[0] at any moment, which is not the prediction
+    h[2] = HASH_INIT;
+    for (i = 0; i < MAXSPRITES; i++)
+        if (!(sprite[i].statnum == 11 && sprite[i].picnum == MUSICANDSFX))
+            fnv_int(&h[2], (int)RawHash(&hittype[i], sizeof(hittype[i])));
     h[3] = RawHash(sector, sizeof(sector));
     h[4] = RawHash(wall, sizeof(wall));
     h[5] = RawHash(&ud, sizeof(ud));
