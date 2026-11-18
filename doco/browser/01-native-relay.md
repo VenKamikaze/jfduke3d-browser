@@ -93,4 +93,82 @@ All in `tests/net/`, run by `make test` (they need `testdata/duke3dshare.grp`, `
 
 ## Outcome
 
-(To be filled in.)
+Status: **review** (branch `browser/01-native-relay` in jfduke3d-browser; the coordinator marks it done after review and merge). Commits: `4eb9667` (the game: relay failures, the gate, the log, the hooks), `2bdbf14` (the tests), `1404cf8` (CRLF kept in `premap.c` and `Makefile.deps`, the tests find the game by its own name, the `-relay`-outside-`-net` case, docs); the last fix-up commits are on the branch. **The net diff against `claude` is clean**; the first commit alone shows `src/premap.c` as a whole-file change (my script wrote LF over CRLF; the third commit puts it back, `git diff claude -- src/premap.c` is two lines).
+
+**What landed**
+
+- *Relay games natively.* The engine already did the work (brief 00 found two unchanged builds joining a room); what the game lacked was handling: a bad `-relay`, `-host-room` or `-room` used to fall back to a single player game, a failed join was not reported, and a lost session left the game standing still. Now `Network game failed: WHY` (stdout, `duke3d.log`, message box) and exit 1 in `app_main` and `Startup()`; `NetLostCheck()` in the main loop and `waitforeverybody()` ends a game whose relay session is FAILED and has not moved for 2 s (jfSW's L18; 2 s after the resume in the test); `mmulti_vnet_setplayercap(4 or 16)`; `-relay`, `-room` and `-host-room` outside `-net` are refused (they would have started a demo recording and loaded a DEF file). Plain UDP is unchanged. Files: `src/netgame.c`/`.h`.
+- *Test hooks* (`src/testhooks.c`/`.h`): `-testquit<N>`, `-testsync`, `-testnudge<T>`, `-testdump<name>`, and `-teststate[<T>]` (the state as text; not asked for, but the first 3-player difference could not be found without it, so it stayed). They work in network games, single player and demo playback. `tests/tools/testdump.py`.
+- *The out-of-sync log*: `GAME OUT OF SYNC: sync check N (tic T), player P differs from the master`, once per run of mismatches; `NetSyncChecks`/`NetSyncMismatches`.
+- *D14, the shareware gate* (`NetGameAllowed()`): see below.
+- *Tests* and `make test`, `make test-mmulti`, `make test-net`; `building.md` §8; `code-facts.md` §15; `bugs.md` D1 and D2; D14 in `README.md` and `PROMPT.md`.
+- Edits to existing files: `game.c` (about 60 lines: includes, argument handling, three call sites in `app_main`/`Startup`, one in the main loop, `TestTicHook`/`TestTicEnd`, the sync byte, the packet-6 version byte, `checksync()`), `premap.c` (2 lines), `config.c`/`config.h` (the key), `Makefile` (two objects and the test section), `Makefile.deps`, `Makefile.msvc`. The Xcode project was not touched.
+
+**The `-testdump` format.** `<name>` in the game's working directory, flushed per tic: 32 bytes per game tic, eight little endian 32 bit words: `tic` (1-based, from the start of each level), `randomseed`, then FNV-1a hashes of `players`, `sprites` (and list order), `hittype`, `sectors`, `walls`, `other`; the state before the tic is moved, after this tic's `-testnudge`. What each covers and leaves out: `src/testhooks.c` and `code-facts.md` §15.2 to 15.3. `testdump.py diff A B` prints the first differing tic and parts. (jfSW's is 17 bytes: tic, nine sync bytes, one hash.)
+
+**D14 configuration.** Config key `AllowSharewareNetGames` in `[Comm Setup]` of `duke3d.cfg` (0 or 1, default 0, read and written like the other keys; C name `AllowSharewareNet`); command line `-allowsharewarenet` (not written to the file; **before `-net`**, since mmulti reads what follows it to `--`). `NetGameAllowed()` / `NetGameAllowedFor(game)` in `src/netgame.h` is what the menu and console entries of brief 05 must ask. Refused games print "Network game refused: ..." with the licence reason and exit 1; checked twice (before `initmultiplayersparms`, so no relay room is made, and after the data is final, which covers the startup window and unidentified GRPs). Registered data (anything but the shareware GRP) is always allowed. The gate sits in the game, so a page passes the argument.
+
+**Results** (`make test GAME_RUNS=3` from a clean tree on the branch: 0 failures; the whole suite about 14 minutes; also in the tests: 322 `ok` lines)
+
+| Test | Result |
+|---|---|
+| `make test-scripts` (brief 00's) | 40 and 24 checks pass. (Run from a shell that ignores SIGINT, as a background job does, one check of `tests/run-headless.sh` "SIGINT to the script: its status" fails: an artefact of that shell, not of this brief; `make test` from a normal shell, or the Python launcher used here, passes.) |
+| `test-mmulti` | 10 of 10 runs: every packet exactly once, in order, intact; all three agree on the players |
+| `test-three-games --relay` (3 players, 900 tics) | 3 of 3 runs (`GAME_RUNS=3`): each machine 897 to 899 sync checks, 0 mismatches, all exit 0, three identical 900-record dumps |
+| 2 and 4 players, relay | pass (900 tics, identical dumps) |
+| 3 players, relay, `loss=3,dup=2,reorder=3,lat=10,jit=5` | passes (600 tics) |
+| 3 players, plain UDP | passes (900 tics) |
+| `test-desync` | passes: the nudged machine and the master log the desync at tic 300 with `-testsync` and within 8 tics without; the other slave logs none; the dumps first differ at record 300 in `players`; the machines that did not diverge stay identical |
+| `test-single` | passes: two single player runs and two playbacks of a demo give identical 300-record dumps, `-testquit` exits 0 by itself |
+| `test-udp-unchanged` | passes: all four mmulti combinations; the old and the new game print the same mmulti lines; old master with new slaves and new master with old slaves play 600 tics |
+| `test-errors` | passes (47 checks), including the new `relay-outside-net` and `room-outside-net` |
+| `test-relay-lost` | passes: the joiner exits 1 about 2 s after being resumed, "Network game failed: the relay ended the session" |
+| `test-shareware-gate` | passes (25 checks): refused by default in four ways, relay made no room, file value 0 refuses, single player unaffected, allowed by the argument and by the file, two games play 100 tics, registered (a copy of the GRP that has no `DUKESW.BIN`) allowed |
+
+Also: the software renderer build (`USE_POLYMOST=0 USE_OPENGL=0`) builds with 7 warnings (none in new code), the default with 12 (all brief 00's; none new), and from a fresh recursive clone of the branch; a single player run of the software build gives the same dump as the OpenGL build. A 3-player game ran 2795 tics without the hang jfSW found at tic 1522 (F1).
+
+**Each new test fails without its fix** (a mutation of a copy of the source, or an old binary; the checks that failed):
+
+| Test | Mutation | Result |
+|---|---|---|
+| `test-mmulti-vnet` | `--stub-resend` (no resend) | all three processes fail, "test timed out (sent 300, received 26)" |
+| `test-three-games` | `--nudge 1:300` | no desync logged by the nudged machine and the master, its dump differs at record 300: 3 checks fail |
+| `test-three-games` | `auto_aim` added to the hash (what bug D1 is) | the 3-player game fails at tic 1 (the dumps differ, and the slaves do not finish): 12 checks |
+| `test-desync` | the log switched off in `NetSyncDiffers` | 4 checks fail (nothing logged, either run) |
+| `test-desync` | `-testnudge` does nothing | 6 checks fail (no log, dumps equal) |
+| `test-desync` | `TestSyncByte()` returns 0 | the `-testsync` run fails (2 checks); the run without it passes, as it should |
+| `test-single` | `--nudge 100` on one of the two games | the dumps differ at record 100 |
+| `test-single` | `TestTicEnd()` never quits | 20 checks fail (124, no TEST line, dumps of every tic) |
+| `test-udp-unchanged` | `--mutate-wire` | the combinations with the changed master fail |
+| `test-udp-unchanged` | the packet-6 version salt always 8 | old/new mixes fail (3 checks) |
+| `test-errors` | `NetFailIfRelayFailed()` does nothing | `badcode-format`, `room-no-relay`, `relay-with-np` fail (the game plays single player: exit 999 after 15 s) |
+| `test-errors` | `-relay`/`-room` outside `-net` not refused | both new cases fail |
+| `test-errors` | the pre-01 game (`build-baseline.sh`), `--only 'badcode-format|room-no-relay|no-such-room|relay-outside-net'` | all four fail |
+| `test-relay-lost` | `NetLostCheck()` out of the main loop | the joiner hangs (999): 3 checks fail |
+| `test-shareware-gate` | `NetGameAllowedFor()` always 1 | 13 checks fail (nothing is refused) |
+| `test-shareware-gate` | it ignores the option | 6 checks fail (nothing is allowed) |
+
+**Corrections to `code-facts.md`** (written into §15): the out-of-sync message is now logged (§2.5); `-t`, `-a`, `-r` and `-h` prefixes swallow unprefixed test options (§15.1); the engine's room limit is 8 though the game allows 16 over UDP; relayed packet 6 is filed under the relaying machine (**bug D1**, below); `gameexit("")` skips the shareware order screens (used for the clean quit).
+
+**Bugs found (not fixed)**
+
+- **D1, game-breaking candidate, reproduces: in games of 3 or more players, a slave stores another slave's announcement (name, weapon order, `aim_mode`, `auto_aim`, `weaponswitch`) against the master** (`src/game.c` `case 6`, `other` instead of `packbuf[1]`). The slaves then disagree with the master about other slaves' `auto_aim` (decides whether a shot is aimed at them), `weaponswitch` (pickups) and weapon order (out of ammo). Found by `-testdump` (the `players` hash differed at tic 1). Needs its own `F` brief; the fix is one line. `-testdump` leaves these fields out until it is fixed.
+- D2 (cosmetic): a recording game spawns the SE 27 camera effectors visible, a playback does not (`spawn()`, `src/game.c:4671`).
+- For A1 (§15.3): drawing writes `hittype.dispicnum` and the player sprite's `yoffset`; `movefx()` keeps audio state in sprites' `temp_data`; kills are credited to `ps[myconnectindex]`.
+
+**Not done / limits**
+
+- The demo test records an idle player (a headless run has no input), so it exercises little; a later brief should record real play (jfSW's `synth_input.c`).
+- Nothing was tried on Windows or macOS; `Makefile.msvc` lists the new objects (untested), the Xcode project does not; **the wasm build (brief 02) must add `netgame.c` and `testhooks.c` to its object list**.
+- The startup window's online Host and Join go through the gate (checked by reading, not by a test under `xvfb-run`; jfSW's `test-startwin.sh` is brief 05's).
+- A host that vanishes still stalls the other players (they are not told), as in jfSW.
+- `-testdump` has no `players` part for `ps[].gm`, `fta` and the like (§15.3, item 6): not observed to differ, not checked.
+
+**Open questions**
+
+- **D13 or D14.** The coordinator's prompt said "D13" for the gate; the README already used D13 for the file names, so it is D14 here. Rename it if D13 was promised elsewhere.
+- Should D1 be fixed before A1? Every later 3 or 4 player test with different settings depends on it.
+- The engine's `MAXROOMPLAYERS 8` caps relay rooms below Duke's 16 players. A change to the shared fork would have to be agreed with jfSW's; not needed for Duke's shareware (4) or realistic games.
+- A rename of the engine's `Module.jfsw*` hooks (§14) is still open.
+
+**Environment note.** While setting up the worktree I ran `git remote set-url` inside the submodules; because worktree submodules share the repository's configuration, the main repository's `remote.origin.url` briefly pointed at vnet's URL. I put it back (`https://github.com/VenKamikaze/jfduke3d-browser.git`, as `FETCH_HEAD` shows) before the first push. Worktrees `wt-d00` and `wt-d02` share that setting: a push from them in between would have failed, nothing else.
