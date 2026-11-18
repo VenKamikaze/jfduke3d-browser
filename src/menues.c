@@ -3235,6 +3235,7 @@ if (!VOLUMEALL) {
     }
         
         case 700:
+        case 701:   // the sound menu opened by F4 in a game; Escape goes back to the game
             c = (320>>1)-120;
             rotatesprite(320<<15,19<<16,65536L,0,MENUBAR,16,0,10,0,0,xdim-1,ydim-1);
             menutext(320>>1,24,0,0,"SOUNDS");
@@ -3244,6 +3245,16 @@ if (!VOLUMEALL) {
             switch(x)
             {
                 case -1:
+                    if (current_menu == 701)
+                    {
+                        ps[myconnectindex].gm &= ~MODE_MENU;
+                        if(ud.multimode < 2 && ud.recstat != 2)
+                        {
+                            ready2send = 1;
+                            totalclock = ototalclock;
+                        }
+                        break;
+                    }
                     cmenu(200);
                     probey = 1;
                     break;
