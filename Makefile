@@ -164,6 +164,15 @@ else
 all: duke3d$(EXESUFFIX) build$(EXESUFFIX)
 endif
 
+# Browser tests (brief 02; they need scripts/build-wasm.sh and scripts/fetch-test-data.sh first, see
+# doco/browser/building.md section 6.4). tests/web/firefox.js is optional and not run here.
+.PHONY: test-web
+test-web:
+	node tests/web/smoke.js
+	node tests/web/persist.js
+	node tests/web/focus.js
+	node tests/web/loops.js
+
 include Makefile.deps
 
 $(ENGINEROOT)/%:

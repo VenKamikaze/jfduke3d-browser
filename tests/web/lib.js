@@ -24,6 +24,23 @@ function summary(name) {
   return failures === 0 ? 0 : 1;
 }
 
+// The files of a GRP (Ken Silverman's group file: "KenSilverman", a count, then 16-byte entries of name[12] and size, then the data):
+// name (as stored, upper case) -> Buffer.
+function readGrp(file) {
+  const d = fs.readFileSync(file);
+  if (d.toString('latin1', 0, 12) !== 'KenSilverman') { throw new Error(file + ' is not a GRP'); }
+  const n = d.readUInt32LE(12);
+  const out = {};
+  let off = 16 + 16 * n;
+  for (let i = 0; i < n; i++) {
+    const name = d.toString('latin1', 16 + 16 * i, 16 + 16 * i + 12).replace(/\0.*$/, '');
+    const size = d.readUInt32LE(16 + 16 * i + 12);
+    out[name] = d.subarray(off, off + size);
+    off += size;
+  }
+  return out;
+}
+
 // Serves build-wasm and the test data. `files` maps URL paths to local files.
 async function start(port, files) {
   if (!fs.existsSync(path.join(BUILD, 'duke3d.wasm'))) { throw new Error(`${BUILD}/duke3d.wasm not found: run scripts/build-wasm.sh`); }
@@ -103,6 +120,22 @@ async function brightPixels(page, clip) {
     }, png.toString('base64'));
   } finally { await side.close(); }
 }
+// Number of red pixels (red well above green and blue) in a region of the page: the red digits of the status bar.
+async function redPixels(page, clip) {
+  const png = await page.screenshot({ clip, type: 'png' });
+  const side = await page.context().newPage();
+  try {
+    return await side.evaluate(async (data) => {
+      const bmp = await createImageBitmap(await (await fetch('data:image/png;base64,' + data)).blob());
+      const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+      const g = c.getContext('2d'); g.drawImage(bmp, 0, 0);
+      const px = g.getImageData(0, 0, c.width, c.height).data;
+      let n = 0;
+      for (let i = 0; i < px.length; i += 4) { if (px[i] > 150 && px[i + 1] < 110 && px[i + 2] < 90) { n++; } }
+      return n;
+    }, png.toString('base64'));
+  } finally { await side.close(); }
+}
 // Number of pixels (of the clip) that differ noticeably between two moments: `action` is awaited between the
 // two screenshots (null = nothing, to measure how much the picture changes by itself).
 async function changedPixels(page, clip, action, waitMs) {
@@ -134,8 +167,9 @@ async function pixelDiff(page, a, b) {
   } finally { await side.close(); }
 }
 
-// The first save slot's name field in the load/save menus (viewport 1000x800, canvas at the top).
-const SLOT1 = { x: 35, y: 98, width: 410, height: 37 };
+// The first save slot's name field in the load/save menus (viewport 1000x800, canvas at the top): the saved game's name is
+// drawn there in orange (redPixels), nothing for an empty slot.
+const SLOT1 = { x: 688, y: 172, width: 200, height: 26 };
 
 // The picture is "not blank" if it has several distinct colours.
 const MIN_COLORS = 8;
@@ -144,23 +178,25 @@ function notBlank(stats) { return stats.colors >= MIN_COLORS; }
 // A key press the game's polling loops are sure to see (a plain press() can be down and up between two polls).
 async function tap(page, key, ms) { await page.keyboard.down(key); await page.waitForTimeout(ms || 200); await page.keyboard.up(key); }
 
-// Quits from inside a level the way a player does: F10, Y, then any key at the shareware "Give up?" screen.
+// Quits from inside a level the way a player does: F10, Y, then any key at each of the shareware order screens.
 async function quitGame(page) {
   await tap(page, 'F10'); await page.waitForTimeout(800);
   await tap(page, 'y'); await page.waitForTimeout(800);
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 16; i++) {     // the screens fade in and out: a key during a fade is lost, so wait between keys
     if (['ended', 'error'].includes(await page.evaluate(() => window.jfswState))) { return; }
-    await tap(page, 'Space'); await page.waitForTimeout(700);
+    await tap(page, 'KeyA', 100); await page.waitForTimeout(1300);
   }
 }
 
 function pct(sorted, p) { return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]; }
 
-// Time dilation for the tests: makes performance.now() (which SDL's clock and so totalclock come
-// from) run `k` times faster, so a long demo plays faster than real time. Only the test harness
-// does this; the game is unchanged.
+// Time dilation for the tests: makes the clock run `k` times faster, so a long demo plays faster than real time. Only the test
+// harness does this; the game is unchanged. SDL's Emscripten build reads the time with gettimeofday(), which is Date.now(), so
+// that is changed as well as performance.now() (jfSW's copy of this function changed only performance.now(), which the game
+// does not read: its warp had no effect on the game).
 function warpScript(k) {
-  return `(() => { const o = performance.now.bind(performance); const t0 = o(); performance.now = () => t0 + (o() - t0) * ${k}; })();`;
+  return `(() => { const o = performance.now.bind(performance), d = Date.now.bind(Date); const t0 = o(), d0 = d();
+    performance.now = () => t0 + (o() - t0) * ${k}; Date.now = () => Math.floor(d0 + (d() - d0) * ${k}); })();`;
 }
 
 // Runs the game once in a fresh browser context until it ends: `args` are game arguments, `files` is
@@ -196,4 +232,4 @@ async function runGame(env, opts) {
   return Object.assign(result, { state, errors, files, seconds, t0 });
 }
 
-module.exports = { port, changedPixels, pixelDiff, brightPixels, SLOT1, tap, quitGame, runGame, warpScript, root, BUILD, GRP, check, summary, start, stop, open, waitState, canvasStats, analysePng, notBlank, MIN_COLORS, pct };
+module.exports = { readGrp, port, redPixels, changedPixels, pixelDiff, brightPixels, SLOT1, tap, quitGame, runGame, warpScript, root, BUILD, GRP, check, summary, start, stop, open, waitState, canvasStats, analysePng, notBlank, MIN_COLORS, pct };
