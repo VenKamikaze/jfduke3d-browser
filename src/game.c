@@ -980,7 +980,16 @@ void faketimerhandler()
             return;
         }
 
-    while (1)  //Master
+    sendmasterpackets(0x7fffffff);
+}
+
+     //Master: send the slaves the inputs of the tics before tic UPTO that every player has an input for
+void sendmasterpackets(int upto)
+{
+    int i, j, k;
+    input *osyn, *nsyn;
+
+    while (movefifosendplc < upto)  //Master
     {
         for(i=connecthead;i>=0;i=connectpoint2[i])
             if (playerquitflag[i] && (movefifoend[i] <= movefifosendplc)) return;
@@ -8063,6 +8072,12 @@ if (VOLUMEONE) {
             if( ps[myconnectindex].gm&MODE_EOL )
             {
                 closedemowrite();
+
+                // The master sends the slaves the inputs of the tics when it has them, which can be after
+                // it has played them. The slaves need every tic up to the one that ended the level to
+                // end it too: send what is still owed before the master stops sending (ready2send = 0).
+                if (numplayers > 1 && networkmode == 0 && myconnectindex == connecthead)
+                    sendmasterpackets(movefifoplc);
 
                 ready2send = 0;
 
