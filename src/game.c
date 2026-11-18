@@ -448,7 +448,7 @@ void adduserquote(char *daquote)
 void getpackets(void)
 {
     int i, j, k, l;
-    int other, packbufleng;
+    int other, packbufleng, who;
     input *osyn, *nsyn;
 
     sampletimer();
@@ -638,7 +638,15 @@ void getpackets(void)
                         if (i != other) sendpacket(i,packbuf,packbufleng);
 
 
-                if (other != packbuf[1])
+                    //The master re-transmits a slave's announcement, so on a slave the
+                    //player it is about is the index in the packet, not the sender.
+                who = other;
+                if (!networkmode && other == connecthead)
+                {
+                    who = packbuf[1];
+                    if (who >= MAXPLAYERS) break;
+                }
+                else if (other != packbuf[1])
                     debugprintf("getpackets: player %d announcement with mismatched index %d.\n",
                         other, packbuf[1]);
 
@@ -647,22 +655,22 @@ void getpackets(void)
 
                 for (i=3,j=0; packbuf[i] && i<packbufleng; i++)
                     if (j < (int)sizeof(ud.user_name[0])-1)
-                        ud.user_name[other][j++] = packbuf[i];
-                ud.user_name[other][j] = 0;
+                        ud.user_name[who][j++] = packbuf[i];
+                ud.user_name[who][j] = 0;
                 i++;
 
                 if (packbufleng-i < 10+3)
                 {
-                    debugprintf("getpackets: player %d announcement is too short.\n", other);
+                    debugprintf("getpackets: player %d announcement is too short.\n", who);
                     break;
                 }
 
                 //This used to be Duke packet #9... now concatenated with Duke packet #6
-                for (j=0;j<10;j++,i++) ud.wchoice[other][j] = packbuf[i];
+                for (j=0;j<10;j++,i++) ud.wchoice[who][j] = packbuf[i];
 
-                ps[other].aim_mode = packbuf[i++];
-                ps[other].auto_aim = packbuf[i++];
-                ps[other].weaponswitch = packbuf[i++];
+                ps[who].aim_mode = packbuf[i++];
+                ps[who].auto_aim = packbuf[i++];
+                ps[who].weaponswitch = packbuf[i++];
 
                 break;
             case 7:
