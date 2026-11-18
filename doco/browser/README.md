@@ -19,7 +19,7 @@ Each brief (`NN-*.md`) is one unit of work, sized for a single implement → rev
 | 00 | [Set-up, baseline, code facts](00-setup.md) | jfduke3d-browser | — | landed |
 | 01 | [Native relay games](01-native-relay.md), test hooks (`-testquit`, `-testsync`, `-testnudge`, `-testdump` per-tic state hash), `make test-net` | jfduke3d-browser | 00 | landed (merged `cab7a05`) |
 | 02 | [Emscripten port](02-emscripten-port.md): wasm build, page, IDBFS, browser tests (no Duke loop needed a yield) | jfduke3d-browser | 00 (alongside 01) | landed |
-| F-D1 | Fix for 01's D1 (packet 6 re-sent to the wrong slaves in master/slave mode with 3 or more players; confirmed by review; game-breaking) | jfduke3d-browser | 01 | not written, **before A1** |
+| F-D1 | [Fix for 01's D1](F-D1-player-announce.md): packet 6 re-sent to the wrong slaves in master/slave mode with 3 or more players; `-testdump` hashes the announced settings again; `test-player-announce.sh` | jfduke3d-browser | 01 | landed on its branch, awaiting review (fix `fix/net-player-announce` `2ae8fc5`, cherry-picks onto upstream `master`) |
 | A1 | Determinism audit (sound-gated random, local-player state in simulation, CON VM, prediction purity, aim mode) and a level-exit test (the F3 pattern) | jfduke3d-browser | 01 | not written |
 | 03 | Data download (`data.js`, IndexedDB cache, file picker, `grptable.js` from `grpscan.c`; CON from the GRP only), **and the native-against-wasm determinism test** (deferred from 02: native `-testdump` against the wasm one, plus the frame-time check in its jfSW form) | jfduke3d-browser | 02 | not written |
 | 04 | Browser netplay, hidden-tab pass and drawing-state audit (jfSW's 04 and 04c together) | jfduke3d-browser, jfbuild | 01, 02, 03, A1 | not written |
@@ -30,7 +30,7 @@ Each brief (`NN-*.md`) is one unit of work, sized for a single implement → rev
 
 01 and 02 can run in parallel.
 
-**Fixes to bugs in the original game** (see "Bugs found in the original game" below) get their own `F`-briefs when they are found. None yet. jfSW's F2 (the ALSA MIDI crash) is already in the jfaudiolib fork's `claude`; jfSW's F3 and F4 were game fixes in jfSW and are not in this game: A1 checks whether Duke has the same problems (`code-facts.md` §5 says the level-exit code has the same shape as L20).
+**Fixes to bugs in the original game** (see "Bugs found in the original game" below) get their own `F`-briefs when they are found. So far F-D1 (D1: the player announcement). jfSW's F2 (the ALSA MIDI crash) is already in the jfaudiolib fork's `claude`; jfSW's F3 and F4 were game fixes in jfSW and are not in this game: A1 checks whether Duke has the same problems (`code-facts.md` §5 says the level-exit code has the same shape as L20).
 
 Later, not briefed: music (decision below), WebGL rendering through the GLES2 path, touch controls, the Atomic Edition, NAM and other GRPs in the browser, mouse turns drawn between tics (view angle only), smoothing prediction corrections.
 
