@@ -2539,6 +2539,8 @@ void displayrest(int smoothratio)
     if(ps[myconnectindex].newowner == -1 && ud.overhead_on == 0 && ud.crosshair && ud.camerasprite == -1)
         rotatesprite((160-(ps[myconnectindex].look_ang>>1))<<16,100L<<16,65536L,0,CROSSHAIR,0,0,2+1,windowx1,windowy1,windowx2,windowy2);
 
+    TestMenuPoll();     // test-only: -testmenu
+
     if(ps[myconnectindex].gm&MODE_TYPE)
         typemode();
     else
@@ -7044,6 +7046,9 @@ void checkcommandline(int argc, char const * const *argv)
                 }
                 else if (!Bstrcasecmp(c,"testpredict")) {
                     TestPredictArg();           // test-only: check that the prediction never changes the simulation
+                }
+                else if (!Bstrcasecmp(c,"testmenu")) {
+                    TestMenuArg();              // test-only: report "TEST: menu N" when the menu in a game changes
                 }
                 else if (!Bstrncasecmp(c,"testfire",8)) {
                     TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
