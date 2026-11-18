@@ -52,7 +52,7 @@ ifeq ($(WASM_DEBUG),1)
 	WASM_LDFLAGS+= -sASSERTIONS=2 -g2
 endif
 
-WASM_PAGE = $(WASMDIR)/index.html $(WASMDIR)/jfduke3d.js $(WASMDIR)/jfduke3d.css $(WASMDIR)/config.js
+WASM_PAGE = $(WASMDIR)/index.html $(WASMDIR)/jfduke3d.js $(WASMDIR)/jfduke3d.css $(WASMDIR)/config.js $(WASMDIR)/grptable.js $(WASMDIR)/data.js
 
 .PHONY: wasm
 wasm: $(WASMDIR)/duke3d.js $(WASM_PAGE)
