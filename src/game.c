@@ -7824,9 +7824,17 @@ int app_main(int argc, char const * const argv[])
     gamegrp = IdentifyGroup(duke3dgrp);
 
     if (netparam) { // -net parameter on command line.
+        int startwinwillrun =
+#ifdef HAVE_STARTWIN
+            (configloaded < 0 || (ForceSetup && CommandSetup == 0) || (CommandSetup > 0));
+#else
+            0;
+#endif
         // D14: the shareware GRP does not get network games unless they are allowed. Refuse
-        // before anything is opened (a relay room is made as soon as the arguments are read).
-        if (gamegrp && !NetGameAllowedFor(gamegrp->game)) NetRefuseShareware();
+        // before anything is opened (a relay room is made as soon as the arguments are read), but
+        // only when nothing can change the GRP afterwards: the startup window may pick another
+        // one. The authoritative check is below, once every group file is mounted.
+        if (gamegrp && !startwinwillrun && !NetGameAllowedFor(gamegrp->game)) NetRefuseShareware();
         netsuccess = initmultiplayersparms(endnetparam - netparam, &argv[netparam]);
         // A bad -relay, -host-room or -room (mmulti has said what): do not fall back to a
         // single player game the way a plain -net failure does.
@@ -7922,10 +7930,6 @@ int app_main(int argc, char const * const argv[])
         }
     }
 
-    // D14, again with the data that is really loaded (the startup window may have chosen another
-    // GRP or started a network game, and an unidentified GRP is only guessed at above)
-    if (netsuccess && !NetGameAllowed()) NetRefuseShareware();
-
     {
         struct strllist *s;
         while (CommandGrps) {
@@ -7942,6 +7946,11 @@ int app_main(int argc, char const * const argv[])
             CommandGrps = s;
         }
     }
+
+    // D14, the authoritative check: on the data that is really mounted (the startup window may have
+    // chosen another GRP or started a network game, an unidentified GRP is only guessed at above, and
+    // a -g group file can bring shareware data that gametype does not know about)
+    if (netsuccess && !NetGameAllowed()) NetRefuseShareware();
 
     RegisterShutdownFunction( Shutdown );
 

@@ -15,9 +15,21 @@ int NetGameAllowedFor(int game)
     return game != GAMEGRP_GAME_DUKESW || AllowSharewareNet || AllowSharewareNetCmd;
 }
 
+int NetDataIsShareware(void)
+{
+    int fh;
+
+    if (VOLUMEONE) return 1;
+    // 0: the file system and ZIPs first, then every mounted group file (main and -g)
+    fh = kopen4load("DUKESW.BIN", 0);
+    if (fh < 0) return 0;
+    kclose(fh);
+    return 1;
+}
+
 int NetGameAllowed(void)
 {
-    return NetGameAllowedFor(gametype);
+    return !NetDataIsShareware() || AllowSharewareNet || AllowSharewareNetCmd;
 }
 
 void NetRefuseShareware(void)

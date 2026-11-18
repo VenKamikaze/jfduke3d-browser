@@ -35,7 +35,7 @@ int TestSyncTic(int index)
 // machines disagreeing also finds which part of the state they disagree about:
 //   players   ps[] of every connected player: all of the simulation's fields, but not the ones that
 //             are a machine's own (palette pointer, gm, the on-screen message fta/ftq, zoom,
-//             visibility, the flash colour pals/pals_time, refresh_inventory, name), not the
+//             visibility, the flash colour pals, refresh_inventory, name), not the
 //             announced settings aim_mode/auto_aim/weaponswitch (bugs.md D1), and not the
 //             kill statistics actors_killed / max_actors_killed (actors.c credits every kill to
 //             ps[myconnectindex], so they differ between machines: A1's list)
@@ -93,7 +93,7 @@ static void WalkState(emit_fn e)
         P(posx); P(posy); P(posz); P(horiz); P(ohoriz); P(ohorizoff); P(invdisptime);
         P(bobposx); P(bobposy); P(oposx); P(oposy); P(oposz); P(pyoff); P(opyoff);
         P(posxv); P(posyv); P(poszv); P(last_pissed_time); P(truefz); P(truecz);
-        P(player_par); P(bobcounter); P(weapon_sway); P(randomflamex); P(crack_time);
+        P(player_par); P(bobcounter); P(weapon_sway); P(randomflamex); P(crack_time); P(pals_time);
         // not aim_mode, auto_aim and weaponswitch (nor ud.wchoice): a slave sets another slave's from the
         // master's relay of its announcement (packet 6) as if they were the master's, so in a game
         // of three or more they differ between machines (bugs.md D1)

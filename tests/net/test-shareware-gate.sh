@@ -37,27 +37,42 @@ t_start_relay "$rport"
 
 # refused NAME FAIL-REGEX args...: exit 1 at once with the message, never waiting
 refused() {
-    local name="$1"; shift
+    local name="$1" wd="$t_tmp/$1" opts=(); shift
     local t0 t1 st took
+    while [ $# -gt 0 ] && [ "$1" != "--" ]; do opts+=("$1"); shift; done
+    shift
+    case "$name" in g-*) wd="$t_tmp/gsub" ;; both-*) wd="$t_tmp/both" ;; esac
     t0=$(date +%s.%N)
-    t_game "$name" "$t_tmp/$name" --game "$game" --timeout 40 -- "$@"
+    t_game "$name" "$wd" --game "$game" --timeout 40 "${opts[@]}" -- "$@"
     t_wait_pid "$game_pid" 45; st=$t_status
     t1=$(date +%s.%N); took=$(echo "$t1 - $t0" | bc)
     t_check "$name: refused, exit status 1 (got $st) after ${took}s (at most 20 s)" bash -c "[ $st -eq 1 ] && [ \$(echo '$took <= 20' | bc) -eq 1 ]"
-    t_check "$name: says why: 'Network game refused' and the licence" bash -c "grep -q 'Network game refused' '$t_tmp/$name.out' && grep -q 'does not allow online multiplayer' '$t_tmp/$name.out' && grep -q 'Network game refused' '$t_tmp/$name/duke3d.log'"
-    t_check "$name: never waited for players" bash -c "! grep -q 'Waiting for players' '$t_tmp/$name/duke3d.log'"
+    t_check "$name: says why: 'Network game refused' and the licence" bash -c "grep -q 'Network game refused' '$t_tmp/$name.out' && grep -q 'does not allow online multiplayer' '$t_tmp/$name.out' && grep -q 'Network game refused' '$wd/duke3d.log'"
+    t_check "$name: never waited for players" bash -c "! grep -q 'Waiting for players' '$wd/duke3d.log'"
 }
 
 t_note "refused by default (shareware GRP, no option)"
-refused udp-host -net -nm:2 "-p$uport" -- -v1 -l1 -c2
-refused udp-join -net -nm "-p$((uport + 1))" "127.0.0.1:$uport" -- -v1 -l1 -c2
-refused relay-host -net -relay "127.0.0.1:$rport" -host-room 2 -- -v1 -l1 -c2
-refused relay-join -net -relay "127.0.0.1:$rport" -room ABCDE2 -- -v1 -l1 -c2
+refused udp-host -- -net -nm:2 "-p$uport" -- -v1 -l1 -c2
+refused udp-join -- -net -nm "-p$((uport + 1))" "127.0.0.1:$uport" -- -v1 -l1 -c2
+refused relay-host -- -net -relay "127.0.0.1:$rport" -host-room 2 -- -v1 -l1 -c2
+refused relay-join -- -net -relay "127.0.0.1:$rport" -room ABCDE2 -- -v1 -l1 -c2
 t_check "the relay made no room for the refused host" bash -c "! grep -q 'created' '$t_tmp/relay-$rport.log'"
 mkdir -p "$t_tmp/cfg0"; printf '[Comm Setup]\nAllowSharewareNetGames = 0\n' > "$t_tmp/cfg0/duke3d.cfg"
 t_game cfg-zero "$t_tmp/cfg0" --game "$game" --timeout 40 -- -net -nm:2 "-p$uport" -- -v1 -l1 -c2
 t_wait_pid "$game_pid" 45
 t_check "an explicit AllowSharewareNetGames = 0 refuses too (exit $t_status)" bash -c "[ $t_status -eq 1 ] && grep -q 'Network game refused' '$t_tmp/cfg0/duke3d.log'"
+
+t_note "shareware data that is not the main GRP: -g from a subfolder, the main GRP missing (the gate must see the data that is mounted)"
+mkdir -p "$t_tmp/gsub/sub"; ln -sf "$root/testdata/duke3dshare.grp" "$t_tmp/gsub/sub/duke3dshare.grp"
+refused g-udp-host --grp none -- -net -nm:2 "-p$uport" -- -v1 -l1 -c2 -gsub/duke3dshare.grp
+refused g-relay-host --grp none -- -net -relay "127.0.0.1:$rport" -host-room 2 -- -v1 -l1 -c2 -gsub/duke3dshare.grp
+refused g-relay-join --grp none -- -net -relay "127.0.0.1:$rport" -room ABCDE2 -- -v1 -l1 -c2 -gsub/duke3dshare.grp
+t_check "the relay made no room for them either" bash -c "! grep -q 'created' '$t_tmp/relay-$rport.log'"
+
+t_note "both a registered-looking GRP and the shareware GRP present: the game loads the shareware one, so it is refused"
+mkdir -p "$t_tmp/both"; ln -sf "$root/testdata/duke3dshare.grp" "$t_tmp/both/duke3dshare.grp"
+"$root/tests/net/modgrp.py" registered "$root/testdata/duke3dshare.grp" "$t_tmp/both/duke3d.grp" >/dev/null || t_bad "modgrp.py failed"
+refused both-udp --grp none -- -net -nm:2 "-p$uport" -- -v1 -l1 -c2
 
 t_note "single player is not affected"
 t_game single "$t_tmp/single" --game "$game" --timeout 60 -- -v1 -l1 -testquit60
@@ -77,6 +92,12 @@ allowed() {
 t_note "allowed with -allowsharewarenet (before -net)"
 T_ALLOW= allowed cli-relay 'room code [A-Z0-9]{6}' -allowsharewarenet -net -relay "127.0.0.1:$rport" -host-room 2 -- -v1 -l1 -c2
 T_ALLOW= allowed cli-udp 'Waiting for players' -allowsharewarenet -net -nm:2 "-p$uport" -- -v1 -l1 -c2
+
+t_note "allowed with the option when the shareware data comes in by -g"
+T_ALLOW= t_game g-allowed "$t_tmp/gsub" --game "$game" --grp none --timeout 30 -- -allowsharewarenet -net -relay "127.0.0.1:$rport" -host-room 2 -- -v1 -l1 -c2 -gsub/duke3dshare.grp
+pid=$game_pid
+t_check "g-allowed: -allowsharewarenet lets it through" t_wait_for "$t_tmp/gsub/duke3d.log" 'room code [A-Z0-9]{6}' 20
+kill -TERM "$pid" 2>/dev/null; t_wait_pid "$pid" 15
 
 t_note "allowed by the configuration file"
 mkdir -p "$t_tmp/cfg1"; printf '[Comm Setup]\nAllowSharewareNetGames = 1\n' > "$t_tmp/cfg1/duke3d.cfg"

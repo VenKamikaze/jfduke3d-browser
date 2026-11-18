@@ -8,6 +8,8 @@
 #ifndef NETGAME_H_
 #define NETGAME_H_
 
+#include "types.h"      // int32 (jfmact)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,10 +29,17 @@ extern "C" {
 // Host. Later entry points (the menu and console Host/Join) must ask NetGameAllowed() too.
 extern int32 AllowSharewareNetCmd;      // -allowsharewarenet
 
-// 1 when a network game may be started with the data that is loaded (gametype must be known).
+// 1 when the data the game has mounted is shareware: gametype says so (VOLUMEONE), or a DUKESW.BIN
+// (the shareware's marker, which the game itself guesses by when it cannot identify a GRP) can be
+// opened from anywhere: the main GRP, a -g extra GRP, a ZIP, a loose file. Only meaningful once every
+// group file is mounted. It does not change gametype (a registered game with a shareware -g add-on
+// still behaves as registered; it just gets no network games).
+int NetDataIsShareware(void);
+// 1 when a network game may be started with the data that is mounted: the one authoritative check
+// (app_main calls it after every group file is mounted; so must the later entry points).
 int NetGameAllowed(void);
-// 1 when a network game may be started with a GRP of this kind (GAMEGRP_GAME_*), whatever the
-// loaded data: for the check before the data is loaded.
+// 1 when a network game may be started with a main GRP of this kind (GAMEGRP_GAME_*): the early
+// check, before the data is mounted. It may only refuse what NetGameAllowed() would refuse too.
 int NetGameAllowedFor(int game);
 // Say why not (stdout, the log and a message box) and exit with status 1. Closes the network
 // first (uninitmultiplayers), so a relay room that was just made is left again.
