@@ -16,11 +16,12 @@ Each brief (`NN-*.md`) is one unit of work, sized for a single implement → rev
 
 | # | Brief | Repos touched | Depends on | Status |
 |---|---|---|---|---|
-| 00 | [Set-up, baseline, code facts](00-setup.md) | jfduke3d-browser | — | review |
-| 01 | Native relay games, test hooks (`-testquit`, `-testsync`, `-testnudge`, `-testdump` per-tic state hash), `make test-net` | jfduke3d-browser | 00 | not written |
-| 02 | Emscripten port: wasm build, page, IDBFS, yields in Duke's loops, browser tests | jfduke3d-browser, jfbuild, jfaudiolib | 00 (alongside 01) | not written |
+| 00 | [Set-up, baseline, code facts](00-setup.md) | jfduke3d-browser | — | landed |
+| 01 | [Native relay games](01-native-relay.md), test hooks (`-testquit`, `-testsync`, `-testnudge`, `-testdump` per-tic state hash), `make test-net` | jfduke3d-browser | 00 | landed (merged `cab7a05`) |
+| 02 | [Emscripten port](02-emscripten-port.md): wasm build, page, IDBFS, browser tests (no Duke loop needed a yield) | jfduke3d-browser | 00 (alongside 01) | merged (coordinator check pending) |
+| F-D1 | Fix for 01's D1 (packet 6 re-sent to the wrong slaves in master/slave mode with 3 or more players; confirmed by review; game-breaking) | jfduke3d-browser | 01 | not written, **before A1** |
 | A1 | Determinism audit (sound-gated random, local-player state in simulation, CON VM, prediction purity, aim mode) and a level-exit test (the F3 pattern) | jfduke3d-browser | 01 | not written |
-| 03 | Data download (`data.js`, IndexedDB cache, file picker, `grptable.js` from `grpscan.c`; CON from the GRP only) | jfduke3d-browser | 02 | not written |
+| 03 | Data download (`data.js`, IndexedDB cache, file picker, `grptable.js` from `grpscan.c`; CON from the GRP only), **and the native-against-wasm determinism test** (deferred from 02: native `-testdump` against the wasm one, plus the frame-time check in its jfSW form) | jfduke3d-browser | 02 | not written |
 | 04 | Browser netplay, hidden-tab pass and drawing-state audit (jfSW's 04 and 04c together) | jfduke3d-browser, jfbuild | 01, 02, 03, A1 | not written |
 | 04b | Lag cuts | jfduke3d-browser, jfbuild | 04 | not written |
 | 05 | Host and join (page, lobby, Start now, Duke's menus, console and startup window, hidden-tab `dobonus`) | jfduke3d-browser, jfbuild | 04b | not written |

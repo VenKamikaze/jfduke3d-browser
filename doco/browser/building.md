@@ -93,6 +93,8 @@ Game options used above: `-v1 -l1` (episode 1, level 1, skipping the logo and me
 
 ## 6. Emscripten (browser builds, from brief 02 on)
 
+### 6.1 Toolchain
+
 ```sh
 scripts/setup-emsdk.sh                  # emsdk + Emscripten 6.0.13 into ~/.cache/jfduke3d-browser/emsdk
 scripts/setup-emsdk.sh --with-ports     # the same, plus the SDL2, Ogg and Vorbis ports
@@ -114,7 +116,59 @@ C
 emcc /tmp/t.c -sUSE_SDL=2 -o /tmp/t.js && echo ok
 ```
 
-The wasm build of the game (`scripts/build-wasm.sh`, `build-wasm/`, the page in `web/`) is **brief 02**: placeholder, nothing to run yet. `scripts/build-id.sh` (brief 05b) and `scripts/setup-firefox.sh` likewise.
+### 6.2 Build the game for the browser
+
+```sh
+scripts/build-wasm.sh                   # incremental; the first build also builds Emscripten's system libraries
+scripts/build-wasm.sh clean             # remove the wasm objects only
+scripts/build-wasm.sh veryclean         # and the libraries and build-wasm/ (**and the native `duke3d`**: it is Makefile's veryclean; build native after)
+EMSDK_DIR=~/.cache/jfsw-browser/emsdk scripts/build-wasm.sh   # reuse jfSW's emsdk install (same revision, same ports)
+```
+
+That is `emmake make -j4 USE_POLYMOST=0 USE_OPENGL=0` after sourcing the emsdk (the software renderer only, D6). `Makefile` includes `Makefile.emscripten` when the compiler is `emcc` and adds `-DDATADIR=\"/data\"` and `-O2` for the game; `jfbuild/Makefile.shared` and `jfaudiolib/Makefile.shared` recognise `wasm32-unknown-emscripten` as `PLATFORM=EMSCRIPTEN`. There is no startup window, no GTK and no map editor (`build`).
+
+Objects are named `*.wasm.o` and libraries `lib*.wasm.a`, so a native build and a browser build live in the same tree without touching each other (`make clean` in one does not remove the other's objects, except `src/version-auto.c`, which both regenerate). The output is in `build-wasm/` (git-ignored): `index.html`, `jfduke3d.js`, `jfduke3d.css`, `config.js` (copied from `web/`), `duke3d.js` and `duke3d.wasm`.
+
+**Networking.** Under Emscripten the engine library holds `mmulti.c` (its plain UDP code compiled out under `__EMSCRIPTEN__`), `mmulti_vnet.c` and `ext/vnet/src/*.c`, and the link adds `-lwebsocket.js` (vnet's WebSocket transport). Brief 02 was meant to link `mmulti_null.c` instead; the engine fork (`jfbuild` at `5950d14`) no longer has that switch (jfSW's brief 04 removed it) and the fork is not to change, so the browser links the real `mmulti.c`. Without `-net` arguments it behaves as the single-player stub does (`numplayers = 1`), and the page passes none; brief 04 gives the page the relay.
+
+Debug build (function names in traces, run-time assertions) into another directory: `scripts/build-wasm.sh WASM_DEBUG=1 WASMDIR=build-wasm-debug`.
+
+Link options: `-sASYNCIFY` (the game's loops block; `jfbuild/src/sdlayer2.c` hands control back to the browser once per frame, and in event-pumping loops that do not draw), `-sALLOW_MEMORY_GROWTH`, `-sEXIT_RUNTIME` (so `exit()` from anywhere reaches the page's `onExit`), `-sINVOKE_RUN=0` (the page starts `main` from the button), `-lidbfs.js`, `-lwebsocket.js`.
+
+### 6.3 Serve and play
+
+```sh
+scripts/fetch-test-data.sh                     # testdata/duke3dshare.grp
+cd build-wasm && ln -sf ../testdata/duke3dshare.grp .      # the page fetches ./duke3dshare.grp
+python3 -m http.server 8000 --bind 127.0.0.1
+# open http://127.0.0.1:8000/ in Chromium or Firefox, click "Click to start"
+```
+
+This brief's page loads the GRP with a plain `fetch` (brief 03 replaces that with the download, checks and cache): the default is `duke3dshare.grp` next to the page, `?data=<url>` another file (it must send CORS headers if it is on another origin). The page writes it to `/data/duke3d.grp` for the game (the game recognises GRPs by CRC32, not by name). The game keeps `duke3d.cfg`, saved games and the log in IndexedDB (the folder `/persist`); `/data` is in memory only. Page options and test hooks (`?test=1`, which also needs `testMode: true` in `config.js`) are described at the top of `web/jfduke3d.js`.
+
+### 6.4 Browser tests
+
+```sh
+scripts/build-wasm.sh && make -j4           # (the native binary is not needed by these tests; brief 01's and the later determinism test need it)
+make test-web                               # the five below, one after the other (the last fails in the cloud container)
+node tests/web/smoke.js                     # intro, menu, a level, Escape, pointer, quit; no errors
+node tests/web/persist.js                   # settings and saves survive a reload (also one without quitting, and one 250 ms after a save)
+node tests/web/focus.js                     # brief 02c: a refused pointer lock or a lost focus does not end the game; a trap still does (about 1 minute)
+node tests/web/loops.js                     # every loop of code-facts section 4 that the shareware data can reach: the page stays responsive and the loop ends
+node tests/web/frametime.js                 # frame intervals over 40 s of play; its "no stall over 100 ms" check FAILS in the cloud container (software-rendered Chromium), see its header
+```
+
+They use the preinstalled Chromium through Playwright (`require('playwright')`; never run `playwright install`), serve `build-wasm/` and `testdata/duke3dshare.grp` on 127.0.0.1 ports 49101 and up (persist.js 49103, focus.js 49104, loops.js 49105, frametime.js 49106), and clean up after themselves. `focus.js` uses the full Chromium build in headless mode (`channel: 'chromium'`, the same preinstalled browser) rather than Playwright's default headless shell, which reports no mouse movement under pointer lock and crashes on a wasm trap. `JFDUKE3D_WEB_PORT_OFFSET=<n>` moves every port the browser tests use up by n, so that two checkouts can run them on one machine at once. Several of the checks have a sabotage switch that must make them fail: see the top of each test file.
+
+#### Firefox (brief 02c's port; optional, not part of the default runs)
+
+```sh
+scripts/setup-firefox.sh                    # a pinned stock Firefox (160.0, SHA-256 checked) and puppeteer-core (25.17.0), in ~/.cache/jfduke3d-browser
+FIREFOX_CACHE=~/.cache/jfsw-browser node tests/web/firefox.js    # reuse jfSW's copies (the same versions)
+FIREFOX=/usr/bin/firefox node tests/web/firefox.js     # another Firefox (Arch: sudo pacman -S firefox); puppeteer-core still from the script
+```
+
+As in jfSW: Playwright's Firefox needs Playwright's own patched build, so `firefox.js` drives a stock Firefox headless over WebDriver BiDi with `puppeteer-core`, installed by `setup-firefox.sh` with `npm ci` from `tests/web/firefox-deps/package-lock.json` (`FIREFOX_CACHE=DIR` moves both; `--no-firefox` installs only `puppeteer-core`; `PUPPETEER_CORE=DIR` points the test at another copy). Headless Firefox never gives the page the focus, so it refuses every pointer-lock request as a desktop Firefox does after Alt+Tab. The test checks a single player game (refusals at start-up and after a click: logged, game running, no overlay) and a wasm trap (still fatal, with `?persist=0` and with persistence on). Port 49400. Without a Firefox or `puppeteer-core` it prints `firefox: NOT RUN` and exits with status 3, which is not a pass; with other versions in the cache, `firefox: VERSION MISMATCH` and status 3. `FIREFOX_SABOTAGE=unhandled` leaves the lock's promise unhandled, as before the fix: it must fail. jfSW's network parts of this test (a game through a relay, WebTransport) come with the Duke briefs that bring networking.
 
 ## 7. Layout of what brief 00 added
 
@@ -128,6 +182,17 @@ The wasm build of the game (`scripts/build-wasm.sh`, `build-wasm/`, the page in 
 | `Makefile` (`test`, `test-scripts`) | runs those two tests |
 | `ext/vnet` | vnet `v0.5.0` (submodule; built into `jfbuild/libengine.a`; the game uses it through `-relay` since brief 01) |
 | `doco/browser/code-facts.md` | what the code does, with file:line |
+
+Brief 02 added:
+
+| Path | What |
+|---|---|
+| `Makefile.emscripten`, `scripts/build-wasm.sh` | the browser build into `build-wasm/` (section 6.2) |
+| `web/` | the page: `index.html`, `jfduke3d.js`, `jfduke3d.css`, `config.js` |
+| `tests/web/` | `lib.js`, `server.js` (shared), `smoke.js`, `persist.js`, `focus.js`, `loops.js`, `frametime.js`, `firefox.js` + `firefox-deps/` |
+| `scripts/setup-firefox.sh` | a pinned stock Firefox and `puppeteer-core` for `firefox.js` |
+| `Makefile` (`test-web`) | runs the browser tests |
+| `src/menues.c` | the one game change: `duke3d.cfg` is written when the menu is left (`__EMSCRIPTEN__` only) |
 
 ## 8. Network games and their tests (brief 01)
 

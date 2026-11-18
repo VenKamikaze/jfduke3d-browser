@@ -1,0 +1,540 @@
+// Page glue for the browser build of JFDuke3D (brief 02).
+//
+// Runs before duke3d.js: it defines Module (Emscripten's configuration object), then
+// drives the start-up: mount the persistent folder, put the game data in place,
+// wait for the "Click to start" click (browsers only allow sound after one), run
+// main, and say so on the page if the game ends or crashes.
+//
+// This page is jfSW's page (jfsw-browser, web/jfsw.js, as of brief 02c) without what later briefs bring: the data download
+// and cache (brief 03), the network lobby and the host/join parameters (brief 05) and the data-mismatch notice (05b). The
+// names are jfSW's on purpose (Module.jfsw*, window.jfsw*, JFSW_CONFIG): the engine (jfbuild, shared with jfSW) calls the
+// Module.jfsw* hooks, and the browser tests of both games read the same globals.
+//
+// Query string:
+//   ?data=<url>   fetch the GRP from this URL instead of the default, a same-origin duke3dshare.grp next to the page
+//                 (this brief's dev data loader: no cache, no check; brief 03 replaces it). The game recognises the
+//                 file by its CRC32 as it always does, and says so and exits if it is not a GRP it knows.
+//   ?test=1       test hooks (below), only when config.js has testMode: true (a link alone cannot turn them on).
+//                 Nothing else here reads the other options.
+//   ?args=...     game arguments, space separated (test only), e.g. "-v1 -l1 -s1".
+//   ?files=a,b    URLs of files to put in the game's directory before main (test only). The only way a loose file (a
+//                 CON script, say) gets into the game's folder: a loose file overrides the same file in the GRP.
+//   ?persist=0    keep the game's directory in memory only (test only).
+//   ?idb=off      every IndexedDB open fails, as in an old private window (test only).
+//
+// The game data: this file fetches the GRP and writes it to /data/duke3d.grp, a folder that is not persisted and is the
+// game's DATADIR.
+//
+// Test hooks, with ?test=1: window.jfswTest = { FS, readFile(name), writeFile(name, bytes),
+// listFiles(), start(), passUnlockedMouse (set it true to let mouse motion reach the game while the pointer
+// is not locked, as before the fix; for the smoke test's sabotage run), unhandledPointerLock (set it true to leave the
+// promise of a pointer-lock request unhandled, as before brief 02c; for tests/web/focus.js's sabotage run) }; Module.jfswFrameLog (see sdlayer2.c) is an array of frame times;
+// window.jfswOut holds every line the game printed; window.jfswExit is set when it ends.
+(function () {
+  'use strict';
+
+  var params = new URLSearchParams(location.search);
+  // Test mode needs both ?test=1 and testMode: true in config.js (brief 05 review): a link alone cannot turn it
+  // on, so a crafted link cannot hand a visitor's game test arguments (?args=, which can name another relay).
+  // The tests serve a config.js with testMode: true; a site leaves it false (data-hosting.md, brief 06).
+  var TEST = params.get('test') === '1' && !!(window.JFSW_CONFIG && window.JFSW_CONFIG.testMode === true);
+  var PERSIST = !(TEST && params.get('persist') === '0');
+  if (TEST && params.get('idb') === 'off') {
+    // Test hook: what an old Firefox private window did: opening a database fails (for the game's IDBFS; brief 03's data cache will use it too).
+    var failing = function () {
+      var req = {};
+      setTimeout(function () {
+        req.error = new DOMException('simulated: IndexedDB is not available', 'InvalidStateError');
+        if (req.onerror) { req.onerror({ target: req, type: 'error', preventDefault: function () {}, stopPropagation: function () {} }); }
+      }, 0);
+      return req;
+    };
+    Object.defineProperty(window, 'indexedDB', { configurable: true, value: { open: failing, deleteDatabase: failing, cmp: function () { return 0; } } });
+  }
+  var storageNote = '';
+
+  var DATA_OVERRIDE = params.get('data');
+  var DATA_URL = DATA_OVERRIDE || 'duke3dshare.grp';
+  var DATA_DIR = '/data';        // on the game's search path (DATADIR in the Makefile); not persisted
+  var HOME_DIR = '/persist';     // the game's current directory: duke3d.cfg, saves, duke3d.log; IndexedDB
+  var GRP_NAME = 'duke3d.grp';
+  var CLOSE_DELAY_MS = 10;       // after a file written by the game is closed, wait this long, then write to IndexedDB
+  // Files the game rewrites at every start or all the time, which are not worth a write to IndexedDB on their own.
+  function quietFile(name) { return name === 'duke3d.log' || name === 'grpfiles.cache' || name.indexOf('symbols missing') >= 0; }
+
+  var canvas = document.getElementById('canvas');
+  var overlay = document.getElementById('overlay');
+  var statusEl = document.getElementById('status');
+  var progressEl = document.getElementById('progress');
+  var startBtn = document.getElementById('start');
+  var reloadBtn = document.getElementById('reload');
+  var retryBtn = document.getElementById('retry');
+  var helpEl = document.getElementById('help');
+  var testInfoEl = document.getElementById('testinfo');
+
+  var running = false;
+  var ended = false;
+  var FS = null;
+  var lastMessage = '';
+
+  window.jfswOut = [];
+  window.jfswErr = [];
+  window.jfswState = 'loading';   // loading, needdata (the game data could not be fetched: retry), ready, running, ended, error
+  window.jfswSyncs = 0;           // completed writes to IndexedDB
+
+  function setState(s) { window.jfswState = s; }
+
+  function showStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle('error', !!isError);
+  }
+
+  // Something went wrong or the game is over: say so on the page, over the last picture. `replace`: an error that
+  // replaces an "ended" message already shown (see gameError()).
+  function finish(message, isError, replace) {
+    if (ended && !(replace && window.jfswState === 'ended')) { return; }
+    ended = true;
+    running = false;
+    setState(isError ? 'error' : 'ended');
+    overlay.hidden = false;
+    progressEl.hidden = true;
+    startBtn.hidden = true;
+    retryBtn.hidden = true;
+    reloadBtn.hidden = false;
+    showStatus(message, isError);
+    reloadBtn.focus();
+  }
+  reloadBtn.addEventListener('click', function () { location.reload(); });
+
+  function describe(e) {
+    return (e && (e.message || e.reason && (e.reason.message || e.reason))) || String(e);
+  }
+  // A description as a sentence of its own: exactly one full stop at the end, whether or not the browser's
+  // message has one ("The document is not focused." would otherwise become "focused.. Reload ...").
+  function sentence(text) {
+    text = String(text).trim();
+    return /[.!?]$/.test(text) ? text : text + '.';
+  }
+
+  // An array that keeps at most `max` of the newest entries (the game pushes about 60 a second).
+  function capped(arr, max) {
+    arr.push = function (v) { Array.prototype.push.call(this, v); if (this.length > max) { this.splice(0, this.length - max / 2); } return this.length; };
+    return arr;
+  }
+
+  var Module = {
+    canvas: canvas,
+    noInitialRun: true,
+    print: function (text) {
+      console.log(text);
+      if (window.jfswOut.length < 20000) { window.jfswOut.push(text); }
+    },
+    printErr: function (text) {
+      console.warn(text);
+      if (window.jfswErr.length < 20000) { window.jfswErr.push(text); }
+    },
+    setStatus: function (text) {
+      var m = /\((\d+)\/(\d+)\)/.exec(text || '');
+      if (m && +m[2] > 0) { progressEl.hidden = false; progressEl.value = 100 * +m[1] / +m[2]; }
+      if (text && !ended && window.jfswState === 'loading') { showStatus(text); }
+    },
+    // wm_msgbox() in jfbuild/src/sdlayer2.c: what the game would show in a dialog.
+    jfswMessage: function (title, text) { lastMessage = (title ? title + ': ' : '') + text; },
+    onRuntimeInitialized: function () { prepare().catch(function (e) { finish('Could not start: ' + describe(e), true); }); },
+    // exit() was called somewhere in the game, or main returned.
+    onExit: function (code) {
+      window.jfswExit = { code: code };
+      exitedAt = performance.now();
+      stopSyncing();
+      var msg = code === 0 ? 'The game has ended.' : 'The game stopped with an error (exit status ' + code + ').';
+      if (lastMessage) { msg += ' ' + sentence(lastMessage); }
+      var again = ' Reload the page to play again.';
+      syncNow().then(function () { finish(msg + again, code !== 0); },
+                     function () { finish(msg + ' (Saving to the browser failed.)' + again, code !== 0); });
+    },
+    onAbort: function (what) {
+      finish('The game crashed: ' + sentence(what) + ' Reload the page to try again.', true);
+    }
+  };
+  window.Module = Module;
+
+  // Relay test knobs (see the top): only with ?test=1. mmulti_vnet.c reads Module.jfswKnobs and nothing else.
+  Module.jfswKnobs = {};
+  if (TEST) {
+    ['relay_wt', 'relay_cert', 'impair'].forEach(function (k) {
+      if (params.get(k)) { Module.jfswKnobs[k] = params.get(k); }
+    });
+  }
+  window.jfswKnobs = Module.jfswKnobs;
+
+  // A trap in WebAssembly, or an error in the game's own scripts, would otherwise just freeze the picture.
+  // Errors from elsewhere (a browser extension, say) are logged and the game goes on.
+  function fromGame(err, file) {
+    if (typeof WebAssembly !== 'undefined' && err instanceof WebAssembly.RuntimeError) { return true; }
+    var where = (file || '') + ' ' + ((err && err.stack) || '');
+    return /(^|\/)(duke3d|jfduke3d)\.(js|wasm)/.test(where) || /duke3d\.wasm/.test(where);
+  }
+  // A trap or an error inside the game's frame reaches Module.onExit first: Emscripten's callUserCallback() ends the
+  // runtime (exit with the last status, usually 0) on its way out, and the error itself comes after, as an 'error'
+  // event or an unhandled rejection (the order of the two is the browser's). So such an error shortly after an exit is
+  // still the game's, and its message replaces "The game has ended." (brief 02c, bugs.md L33). The error comes within
+  // a few ms; the window is 250 ms. Not a DOMException once the game has exited, whether or not the exit's save is still
+  // running (`running` is true until then): that is a browser API refusing something, not the game failing; for
+  // example, when the game closes its audio on the way out, Firefox rejects every AudioContext.resume() still pending
+  // with "Closed before resume completed". Nor Emscripten's ExitStatus, which is how exit() unwinds.
+  var exitedAt = 0;
+  function gameError(err, file) {
+    if (!fromGame(err, file)) { return false; }
+    if (err && err.name === 'ExitStatus') { return false; }
+    var refusal = typeof DOMException !== 'undefined' && err instanceof DOMException;
+    if (exitedAt > 0 && refusal) { return false; }
+    if (running) { return true; }
+    return exitedAt > 0 && performance.now() - exitedAt < 250;
+  }
+  window.addEventListener('error', function (e) {
+    if (gameError(e.error, e.filename)) { finish('Something went wrong: ' + sentence(describe(e)) + ' Reload the page to try again.', true, true); }
+    else { console.warn('page error (not from the game):', describe(e)); }
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    if (gameError(e.reason)) { finish('Something went wrong: ' + sentence(describe(e)) + ' Reload the page to try again.', true, true); return; }
+    var r = e.reason;
+    var lateDom = exitedAt > 0 && typeof DOMException !== 'undefined' && r instanceof DOMException;
+    if (lateDom) { e.preventDefault(); console.info('expected rejection (after the game ended):', describe(e)); return; }
+    console.warn('unhandled rejection (not from the game):', describe(e));
+  });
+
+  // ---- Files ------------------------------------------------------------------------------------------
+
+  function exists(path) { try { FS.stat(path); return true; } catch (e) { return false; } }
+
+  function syncfs(populate) {
+    return new Promise(function (resolve, reject) {
+      FS.syncfs(populate, function (err) { if (err) { reject(err); } else { resolve(); } });
+    });
+  }
+
+  // Signature of the persisted folder; duke3d.log changes all the time and is not worth a write on its own.
+  function persistSignature() {
+    var parts = [];
+    FS.readdir(HOME_DIR).sort().forEach(function (name) {
+      if (name === '.' || name === '..' || quietFile(name)) { return; }
+      try {
+        var st = FS.stat(HOME_DIR + '/' + name);
+        parts.push(name + ':' + st.size + ':' + (+st.mtime));
+      } catch (e) { /* gone again */ }
+    });
+    return parts.join('|');
+  }
+
+  var lastSignature = '';
+  var writing = false;
+  var current = Promise.resolve();
+  var queued = null;
+  var syncTimer = 0;
+  var closeTimer = 0;
+
+  function run() {
+    writing = true;
+    lastSignature = persistSignature();
+    current = syncfs(false).then(function () { window.jfswSyncs++; writing = false; },
+      function (e) { writing = false; console.warn('Saving to the browser failed:', e); throw e; });
+    return current;
+  }
+  // Writes the persisted folder to IndexedDB. A request that arrives while a write is running is not
+  // dropped: one more write follows it (several requests share that one), and the returned promise
+  // settles when the write that covers this request has finished.
+  function syncNow() {
+    if (!PERSIST) { return Promise.resolve(); }
+    if (!writing) { return run(); }
+    if (!queued) {
+      var go = function () { queued = null; return run(); };
+      queued = current.then(go, go);
+    }
+    return queued;
+  }
+  function syncIfChanged() { if (persistSignature() !== lastSignature) { syncNow().catch(function () {}); } }
+
+  function startSyncing() {
+    if (!PERSIST) { return; }
+    lastSignature = persistSignature();
+    // The game writes its files with plain C file calls. Watch the closes of files opened for writing in
+    // the persisted folder (a save game, duke3d.cfg) and write to IndexedDB a moment after the last one.
+    var realClose = FS.close;
+    FS.close = function (stream) {
+      var path = stream && stream.path;
+      var wrote = stream && (stream.flags & 3) !== 0;
+      var r = realClose.apply(FS, arguments);
+      if (wrote && path && path.indexOf(HOME_DIR + '/') === 0 && !quietFile(path.substr(HOME_DIR.length + 1))) {
+        clearTimeout(closeTimer);
+        closeTimer = setTimeout(function () { syncNow().catch(function () {}); }, CLOSE_DELAY_MS);
+      }
+      return r;
+    };
+    // A safety net for anything that was changed without a close (and is not duke3d.log).
+    syncTimer = setInterval(syncIfChanged, 1000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { syncIfChanged(); } });
+    window.addEventListener('pagehide', syncIfChanged);
+  }
+  function stopSyncing() { clearInterval(syncTimer); }
+
+  function fetchBytes(url, label) {
+    return fetch(url).then(function (resp) {
+      if (!resp.ok) { throw new Error(label + ': ' + url + ' answered ' + resp.status + ' ' + resp.statusText); }
+      var total = +resp.headers.get('content-length') || 0;
+      if (!resp.body || !resp.body.getReader) { return resp.arrayBuffer().then(function (b) { return new Uint8Array(b); }); }
+      var reader = resp.body.getReader();
+      var chunks = [];
+      var got = 0;
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) { return; }
+          chunks.push(r.value);
+          got += r.value.length;
+          if (total) { progressEl.hidden = false; progressEl.value = 100 * got / total; }
+          showStatus(label + ' ' + (got / 1048576).toFixed(1) + (total ? ' / ' + (total / 1048576).toFixed(1) : '') + ' MB');
+          return pump();
+        });
+      }
+      return pump().then(function () {
+        var out = new Uint8Array(got);
+        var at = 0;
+        chunks.forEach(function (c) { out.set(c, at); at += c.length; });
+        return out;
+      });
+    }, function (e) { throw new Error(label + ': could not fetch ' + url + ' (' + describe(e) + ')'); });
+  }
+
+  // ---- Game data --------------------------------------------------------------------------------------
+  // This brief's dev data loader: fetch the GRP (no cache, no check) and write it where the game looks. Brief 03 replaces it
+  // with jfSW's data.js (download, checks, an IndexedDB cache, "use your own copy").
+
+  var prepared = false;       // the game data is in place and the page is otherwise ready
+
+  function writeGrp(bytes) {
+    var path = DATA_DIR + '/' + GRP_NAME;
+    FS.writeFile(path, bytes);
+    // The game keeps (name, size, mtime, CRC32) of the GRPs it has seen in grpfiles.cache and checksums a file again
+    // when one of them differs; this file is new every time, so it is checksummed on every start (a fraction of a second).
+  }
+
+  function acquire() {
+    setState('loading');
+    startBtn.hidden = true;
+    retryBtn.hidden = true;
+    progressEl.hidden = true;
+    showStatus('Loading game data...');
+    return fetchBytes(DATA_URL, 'Game data').then(function (bytes) {
+      writeGrp(bytes);
+      progressEl.hidden = true;
+      return prepared ? Promise.resolve() : finishPrepare();
+    }).then(function () {
+      prepared = true;
+      showStatus('Ready.' + (storageNote ? storageNote : ''), !!storageNote);
+      startBtn.hidden = false;
+      startBtn.focus();
+      setState('ready');
+    }, function (e) {
+      window.jfswDataError = { message: describe(e) };
+      progressEl.hidden = true;
+      startBtn.hidden = true;
+      showStatus('The game data could not be loaded: ' + sentence(describe(e)) + '\nThe game has not been started. You can try again.', true);
+      retryBtn.hidden = false;
+      setState('needdata');
+    });
+  }
+  retryBtn.addEventListener('click', function () { acquire(); });
+
+  function prepare() {
+    FS = Module.FS;
+    FS.mkdir(DATA_DIR);
+    FS.mkdir(HOME_DIR);
+    var ready = Promise.resolve();
+    if (PERSIST) {
+      FS.mount(Module.IDBFS, {}, HOME_DIR);
+      showStatus('Loading saved settings...');
+      // Private windows and blocked site data can make IndexedDB fail: play without keeping anything.
+      ready = syncfs(true).catch(function (e) {
+        PERSIST = false;
+        storageNote = ' Saved games and settings will not be kept: this browser would not let the page use its storage (' + describe(e) + ').';
+        console.warn('IndexedDB unavailable:', e);
+      });
+    }
+    return ready.then(function () {
+      // The game's own "portable" switch: with this file in the current directory, duke3d.cfg, saved games
+      // and the log all go in the current directory (code-facts section 6).
+      if (!exists(HOME_DIR + '/user_profiles_disabled')) { FS.writeFile(HOME_DIR + '/user_profiles_disabled', ''); }
+      FS.chdir(HOME_DIR);
+      return acquire();
+    });
+  }
+
+  // After the first game data is in place: the test files, then the syncing of /persist.
+  function finishPrepare() {
+    var files = TEST ? (params.get('files') || '').split(',').filter(Boolean) : [];
+    if (files.length && PERSIST) { return Promise.reject(new Error('?files= puts files in the game\'s folder, which is saved to IndexedDB: add persist=0')); }
+    return files.reduce(function (p, url) {
+      return p.then(function () {
+        return fetchBytes(url, 'Test file').then(function (b) { FS.writeFile(HOME_DIR + '/' + url.split('/').pop().split('?')[0], b); });
+      });
+    }, Promise.resolve()).then(function () {
+      startSyncing();
+    });
+  }
+
+  // ---- Running ----------------------------------------------------------------------------------------
+
+  function gameArgs() {
+    if (!TEST) { return []; }
+    return [].concat((params.get('args') || '').split(/\s+/).filter(Boolean));
+  }
+
+  function start() {
+    if (running || ended || window.jfswState !== 'ready') { return; }
+    startBtn.hidden = true;
+    overlay.hidden = true;
+    helpEl.hidden = false;
+    running = true;
+    setState('running');
+    canvas.focus();
+    fit();
+    try {
+      // The click is the user gesture that lets the game open its audio device.
+      Module.callMain(gameArgs());
+    } catch (e) {
+      if (e === 'unwind') { return; }                       // ASYNCIFY suspended main, as it should
+      if (e && e.name === 'ExitStatus') { return; }         // exit(), reported by onExit
+      finish('The game could not start: ' + sentence(describe(e)), true);
+    }
+  }
+  startBtn.addEventListener('click', start);
+
+  // ---- Canvas size ------------------------------------------------------------------------------------
+
+  // The picture is the video mode the game chose (640x480 to begin with); scale it to the window, keeping
+  // its shape. SDL reads and sets the canvas size itself, so do this from outside, now and then.
+  function fit() {
+    var w = canvas.width, h = canvas.height;
+    if (!w || !h) { return; }
+    var helpH = helpEl.hidden ? 0 : helpEl.offsetHeight + 10;
+    var availW = document.documentElement.clientWidth - 16;
+    var availH = window.innerHeight - helpH - 16;
+    var scale = Math.max(0.25, Math.min(availW / w, availH / h));
+    canvas.style.width = Math.floor(w * scale) + 'px';
+    canvas.style.height = Math.floor(h * scale) + 'px';
+  }
+  window.addEventListener('resize', fit);
+  setInterval(fit, 500);
+
+  // ---- Escape and the mouse ---------------------------------------------------------------------------
+
+  // The game wants the mouse captured all the time (relative mode) and uses Escape for its menu. A browser
+  // takes Escape to leave pointer lock and then does not deliver it to the page, so when the lock is lost
+  // and the game did not ask for that, give the game the Escape it would have had.
+  var gameReleasedLock = false;
+  var lastEscape = 0;
+  if (document.exitPointerLock) {
+    var realExit = document.exitPointerLock.bind(document);
+    document.exitPointerLock = function () { gameReleasedLock = true; return realExit(); };
+  }
+
+  // A refused pointer lock is normal, not a crash (bugs.md L24, brief 02c). The browser refuses a request while the
+  // document does not have the focus, and SDL asks at such moments: when the game handles a focus event after the
+  // window has lost the focus again (Alt+Tab can send blur, focus, blur within a few ms; jfbuild/src/sdlayer2.c, the
+  // SDL_WINDOWEVENT branch) and at start-up (grabmouse(1)) when the page is not focused. Emscripten's helpers in sw.js
+  // call canvas.requestPointerLock() and drop the promise it returns, so a refusal became an unhandled rejection;
+  // Firefox gives the DOMException a stack through sw.js, and the 'unhandledrejection' handler above took it for the
+  // game crashing. Nothing is lost by a refusal: SDL and this page both still see the pointer as free (no
+  // pointerlockchange came), and SDL asks again on the next click on the canvas, or on the next focus.
+  // The canvas is the only element Emscripten asks for the lock (SDL's "#canvas", and Module.canvas). Its fullscreen
+  // calls drop their promises the same way, on the canvas and on the document; the game never asks for fullscreen
+  // (sdlayer2.c keeps the canvas a window), but they are handled alike in case it ever does. So does SDL's audio with
+  // AudioContext.resume() (it asks on every audio callback while the context is suspended): when the game closes its
+  // audio device (on exit, or to reopen it after a sound setting changed) every pending resume() is rejected.
+  // Dropped promises left alone: AudioContext.close() (rejects only for a context already closed), webkitAudioContext
+  // (no browser this page supports lacks AudioContext), and Browser.requestFullscreen()'s new container element in
+  // sw.js (nothing calls it).
+  // A burst of refusals (Firefox rejects 130 to 195 pending resume() calls at once at the end of a game) is logged as
+  // its first one and then one line with the count, a second after the burst.
+  // Test hook: window.jfswTest.unhandledPointerLock = true leaves the lock's promise unhandled, as before the fix.
+  var refusalBursts = {};
+  function logRefusal(what, e) {
+    var b = refusalBursts[what] || (refusalBursts[what] = { more: 0, timer: 0 });
+    if (b.timer) { b.more++; clearTimeout(b.timer); } else { console.warn(what + ' refused:', describe(e)); }
+    b.timer = setTimeout(function () {
+      if (b.more) { console.warn(what + ' refused ' + b.more + ' more time' + (b.more === 1 ? '' : 's') + ' (the same way)'); }
+      b.more = 0; b.timer = 0;
+    }, 1000);
+  }
+  function quietRefusal(obj, name, what) {
+    var real = obj[name];
+    if (typeof real !== 'function') { return; }
+    obj[name] = function () {
+      var r;
+      try { r = real.apply(this, arguments); } catch (e) {
+        // what the browser would have done with a refusal: a rejected promise, here one that already has its handler
+        var p = Promise.reject(e);
+        p.then(null, function (x) { logRefusal(what, x); });
+        return p;
+      }
+      if (TEST && name === 'requestPointerLock' && window.jfswTest && window.jfswTest.unhandledPointerLock) { return r; }
+      if (r && typeof r.then === 'function') { r.then(null, function (e) { logRefusal(what, e); }); }
+      return r;
+    };
+  }
+  quietRefusal(canvas, 'requestPointerLock', 'pointer lock');
+  quietRefusal(canvas, 'requestFullscreen', 'fullscreen');
+  quietRefusal(document, 'exitFullscreen', 'leaving fullscreen');
+  if (window.AudioContext) { quietRefusal(window.AudioContext.prototype, 'resume', 'audio resume'); }
+
+  window.addEventListener('keydown', function (e) { if (e.code === 'Escape') { lastEscape = performance.now(); } }, true);
+  document.addEventListener('pointerlockchange', function () {
+    if (document.pointerLockElement) { gameReleasedLock = false; return; }
+    if (gameReleasedLock) { gameReleasedLock = false; return; }
+    if (!running || !document.hasFocus() || performance.now() - lastEscape < 300) { return; }
+    var init = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
+    window.dispatchEvent(new KeyboardEvent('keydown', init));
+    // Held long enough for the game's next pass over its input.
+    setTimeout(function () { window.dispatchEvent(new KeyboardEvent('keyup', init)); }, 100);
+  });
+
+  // The game keeps SDL in relative mouse mode. While SDL thinks the pointer is not locked, it turns every
+  // mousemove, mouseenter and mouseleave on the canvas into an absolute position and reports the jump from the
+  // last position it knew as relative motion, so a mouse moving over the picture, or the enter or leave the
+  // browser sends as the lock starts or ends, turns the player's view. The game reads only relative motion, so
+  // those events are the game's only while the pointer is locked. SDL learns of the lock from pointerlockchange,
+  // which can come after document.pointerLockElement has changed and after an enter or leave for the same
+  // change: hence our own copy of what SDL was last told.
+  var sdlSeesLock = false;
+  document.addEventListener('pointerlockchange', function () { sdlSeesLock = !!document.pointerLockElement; });
+  ['mousemove', 'mouseenter', 'mouseleave'].forEach(function (type) {
+    window.addEventListener(type, function (e) {
+      if (e.target !== canvas || (sdlSeesLock && document.pointerLockElement === canvas)) { return; }
+      if (TEST && window.jfswTest && window.jfswTest.passUnlockedMouse) { return; }
+      e.stopPropagation();
+    }, true);
+  });
+
+  // ---- Test hooks -------------------------------------------------------------------------------------
+
+  if (TEST) {
+    Module.jfswFrameLog = capped([], 50000);
+    Module.jfswYieldLog = capped([], 50000);
+    Module.jfswShowframes = 0;              // pictures the game asked to present (showframe(); none while a hidden tab plays a network game)
+    Module.jfswOwedLog = capped([], 50000);     // ms each hidden yield lasted that was entered with data held back by mmulti's send window
+    Module.jfswWakes = 0;                   // how often vnet's wake callback fired (sdlayer2.c)
+    Module.jfswHiddenLog = capped([], 50000);   // why each hidden-tab yield ended: 1 a network event, 2 the page became visible, 0 the timer
+    testInfoEl.hidden = false;
+    testInfoEl.textContent = 'test mode: args=' + JSON.stringify(gameArgs()) + ' persist=' + PERSIST;
+    window.jfswTest = {
+      get FS() { return FS; },
+      start: start,
+      readFile: function (name) {
+        try { return FS.readFile(name.charAt(0) === '/' ? name : HOME_DIR + '/' + name); } catch (e) { return null; }
+      },
+      writeFile: function (name, bytes) { FS.writeFile(name.charAt(0) === '/' ? name : HOME_DIR + '/' + name, bytes); },
+      listFiles: function () { return FS.readdir(HOME_DIR).filter(function (n) { return n !== '.' && n !== '..'; }); },
+      syncNow: syncNow
+    };
+  }
+})();
+

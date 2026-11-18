@@ -123,6 +123,13 @@ endif
 ifeq ($(PLATFORM),DARWIN)
 	OURLDFLAGS+= -framework Foundation
 endif
+ifeq ($(PLATFORM),EMSCRIPTEN)
+	# Browser: the page puts the GRP in /data (a folder that is not persisted).
+	OURCPPFLAGS+= -DDATADIR=\"/data\"
+	# Compile at -O2 as the link does (the native default is -O1).
+	CFLAGS:=$(patsubst -O1,-O2,$(CFLAGS))
+	CXXFLAGS:=$(patsubst -O1,-O2,$(CXXFLAGS))
+endif
 
 ifeq ($(RENDERTYPE),SDL)
 	OURCFLAGS+= $(SDLCONFIG_CFLAGS)
@@ -152,7 +159,23 @@ endif
 
 # TARGETS
 .PHONY: clean veryclean all
+ifeq ($(PLATFORM),EMSCRIPTEN)
+all: wasm
+include Makefile.emscripten
+else
 all: duke3d$(EXESUFFIX) build$(EXESUFFIX)
+endif
+
+# Browser tests (brief 02; they need scripts/build-wasm.sh and scripts/fetch-test-data.sh first, see
+# doco/browser/building.md section 6.4). tests/web/firefox.js is optional and not run here.
+.PHONY: test-web
+test-web:
+	node tests/web/smoke.js
+	node tests/web/persist.js
+	node tests/web/focus.js
+	node tests/web/loops.js
+	# frametime.js fails in the cloud container (stalls over 100 ms in a software-rendered Chromium): see its header
+	node tests/web/frametime.js
 
 include Makefile.deps
 

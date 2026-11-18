@@ -28,3 +28,5 @@
 /duke3d
 /grpfiles.cache
 /testdata/
+/build-wasm
+/build-wasm-*
