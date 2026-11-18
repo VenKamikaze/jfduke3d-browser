@@ -61,7 +61,7 @@ See the Outcome and `code-facts.md` §17.
 |---|---|
 | `fix/level-exit-tics` (from `master` `55c5f95`, pushed) | `e79140d` Stop running tics once one has ended the level (D5) |
 | `fix/level-exit-forward` (from `master`, pushed) | `27e9aef` The master sends the slaves the tics it has played before it leaves the level (D6) |
-| `browser/A1-determinism-audit` (from `claude` `605a877`, pushed) | `e6b6d56` merge of D5's fix, `ad4f565` merge of D6's fix (`--no-ff`), `a4d8f46` test hooks, `test-level-exit.sh`, `26876ae` `-testpredict`, `test-predict-pure.sh`, `--nosound`, docs, `9eba8dd` the `-testpredict` hash leaves out the audio thread's writes, and the docs commit that holds this Outcome |
+| `browser/A1-determinism-audit` (from `claude` `605a877`, pushed) | `e6b6d56` merge of D5's fix, `ad4f565` merge of D6's fix (`--no-ff`), `a4d8f46` test hooks, `test-level-exit.sh`, `26876ae` `-testpredict`, `test-predict-pure.sh`, `--nosound`, docs, `9eba8dd` the `-testpredict` hash leaves out the audio thread's writes, and the docs and Outcome commits after it |
 
 Both fix commits end with only `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`, keep `src/game.c` and `src/funct.h` LF as they were (`file` before and after), and **cherry-pick onto upstream `jonof/jfduke3d` `master` (`55c5f95`, a fresh clone, 18 Nov 2026) in either order without a conflict**. Upstream has nothing newer; none of its 15 pull requests (`refs/pull/*/head`, `git diff master...pr` on `game.c`, `player.c`, `sector.c`) mentions `moveloop`, `MODE_EOL`, `movefifosendplc`, `domovethings`, `ready2send` or `faketimerhandler` in a changed line.
 
