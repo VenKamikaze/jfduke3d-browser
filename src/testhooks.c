@@ -420,8 +420,9 @@ static void TestDumpTic(int tic)
 // the socket). Per machine: changes nothing in the simulation.
 //
 // -testfire[<N>]: from game tic N of the first level on (from its start without N) and in every later
-// level, this machine's own inputs select the pistol and hold the fire key (and walk about): the ammo changes every few
-// tics, and in co-op it is carried into the next level. The inputs go over the network as any other.
+// level, this machine's own inputs select the chaingun (weapon 4) and hold the fire key (and walk about): the ammo
+// changes every few tics, and in co-op it is carried into the next level. The inputs go over the network as any
+// other, and at tic 1 every machine gives every player the weapons, so it is in the version byte.
 
 static int TestExitDone;
 static int TestStallTic, TestStallMs, TestStallDone;

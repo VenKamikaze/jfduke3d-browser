@@ -26,7 +26,9 @@
 //                      fifo. Per machine; changes nothing in the simulation.
 //   -testfire[<N>]     (A1) from game tic N of the first level on (from the start without N) and in
 //                      every later level, this machine's own inputs select the chaingun and hold fire
-//                      (the inputs travel as any other), so the ammo count changes every few tics.
+//                      (the inputs travel as any other), so the ammo count changes every few tics. It also
+//                      gives every player the starting weapons and 300 chaingun rounds at tic 1, so every
+//                      player must be given it (version byte).
 //   -testpredict       (A1) every call of fakedomovethings() (the prediction of the local player's moves) is
 //                      checked: the raw bytes of every table of the simulation are hashed before and after
 //                      it, and "TEST: prediction ... changed the simulation" is logged for a difference
