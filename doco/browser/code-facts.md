@@ -381,7 +381,7 @@ Done by reading `src/actors.c`, `sector.c`, `player.c`, `premap.c`, `gamedef.c` 
 | 1 | `game.c:8561-8582` | `moveloop()` plays on after `MODE_EOL` | **real**, D5, fixed | test (`test-level-exit.sh` fails without the fix) |
 | 2 | `game.c:785-1060`, `:8155-8165` | the master leaves the level before it forwards the last tics | **real**, D6, fixed | test (hangs without the fix) |
 | 3 | `sector.c:3008-3016` | `checksectors`: the use key at a mirror with a sound: `snum == screenpeek && !isspritemakingsound()` decides an early `return` | **rare**, D7, open | read; E1L1 and E1L2 have such mirrors (walls with picnum or overpicnum 560 and lotag 252, found in the GRP's maps); not reproduced |
-| 4 | `actors.c:5214`, `:5388`, `sector.c:1884`, `:2251-2256`, `player.c:101`, `:3475` | gibs and glass get the local player's sprite as `owner` | **harmless** (nothing reads it), D8 | read: `actors.c:4492-4600` (their movement) and `hitradius` never use a gib's owner |
+| 4 | `actors.c:5214`, `:5388`, `sector.c:1884`, `:2251-2256`, `player.c:101`, `:3475` | gibs and glass get the local player's sprite as `owner` | **harmless** (nothing reads it), D8 | read: their movement code (`actors.c:4492-4600`) does not touch it, and they neither shoot nor are shot (`cstat` 0) |
 | 5 | `menues.c` `loadplayer()`, `game.c:9096` | a multiplayer load reads this machine's own save file | **rare**, D9 | read |
 | 6 | `gamedef.c:3179` | CON `ifnosounds` branches on audio state | **harmless** in the stock CON (not used: grepped `GAME.CON`, `USER.CON`, `DEFS.CON`), D10 | read |
 | 7 | `game.c:8561-8582`, `premap.c:1540-1556` | input packets carry no tic number; `clearfifo()` comes before `waitforeverybody()` | **rare**, D11 | read; 60+ level exits did not show it |

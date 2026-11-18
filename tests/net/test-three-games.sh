@@ -108,6 +108,11 @@ for n in $(seq 0 $((players - 1))); do
     t_check "player $n played ${reached:-?} tics (need $tics or more; ${line:-no TEST line})" test "${reached:-0}" -ge "$tics"
     t_check "player $n logged no desync" bash -c "! grep -q 'OUT OF SYNC' '$log' '$t_tmp/p$n.out'"
     t_check "player $n saw no version mismatch" bash -c "! grep -q 'different versions' '$log' '$t_tmp/p$n.out'"
+    if [ "$nosound" = "$n" ]; then
+        t_check "player $n ran with sound off" grep -q '^TEST: SoundToggle 0,' "$log"
+    elif [ -n "$nosound" ]; then
+        t_check "player $n ran with sound on" grep -q '^TEST: SoundToggle 1,' "$log"
+    fi
     checks="$(echo "$line" | sed -n 's/.*: \([0-9]*\) sync checks.*/\1/p')"
     need=$((tics - 40)); [ "$every" -eq 8 ] && need=$((tics / 8 - 8))
     t_check "player $n made ${checks:-?} sync checks (need at least $need)" test "${checks:-0}" -ge "$need"

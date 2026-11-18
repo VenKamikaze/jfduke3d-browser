@@ -575,6 +575,8 @@ void TestTicHook(void)
     int tic = movefifoplc + 1;      // movefifoplc is advanced further on in domovethings()
 
     if (tic == 1) TestLevelNo++;
+    if (tic == 1 && TestLevelNo == 1 && (TestSyncOn || TestDumpName[0]))
+        buildprintf("TEST: SoundToggle %d, AmbienceToggle %d\n", SoundToggle, AmbienceToggle);
 
     // a game started with -v1 -l1 gives co-op players no weapons (newgame() only does for a deathmatch;
     // a game started from the menu resets them with the new-game packet): give them the starting ones,
