@@ -18,7 +18,7 @@ port_base="${JFDUKE3D_TEST_PORT_BASE:-47400}"
 export PATH="$PATH:/usr/local/go/bin"
 
 t_pids=()
-t_tmp="$(mktemp -d "${TMPDIR:-/tmp}/jfsw-net.XXXXXX")" || exit 125
+t_tmp="$(mktemp -d "${TMPDIR:-/tmp}/jfduke3d-net.XXXXXX")" || exit 125
 t_fail=0
 
 t_descendants() {   # PID: PID and everything below it

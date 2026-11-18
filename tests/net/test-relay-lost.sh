@@ -38,7 +38,7 @@ joinpid=$game_pid
 t_wait_for "$t_tmp/joiner/duke3d.log" 'TEST: writing the tic dump' 40 || t_bad "the joiner never started the game"
 # it is in the game: let it run for a few seconds
 sleep 4
-gamepid="$(pgrep -P "$joinpid" -x duke3d | head -1)"
+gamepid="$(pgrep -P "$joinpid" -x "$(basename "$game" | cut -c1-15)" | head -1)"
 [ -n "$gamepid" ] || { t_bad "could not find the joiner's game process"; t_result; }
 tics0=$(( $(stat -c %s "$t_tmp/joiner/d.bin") / 32 ))
 t_check "the joiner's game is running ($tics0 tics so far)" test "$tics0" -gt 30

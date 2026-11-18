@@ -10,9 +10,12 @@
 # --only runs just the cases whose name matches REGEX (names are the first
 # word of each check line). Run with --game pointing at a build from before the
 # relay existed (tests/net/build-baseline.sh) to see that these checks bite
-# (tried with --only 'badcode-format|room-no-relay|no-such-room': all fail).
+# (tried with --only badcode-format|room-no-relay|no-such-room against the pre-01 build: all fail).
 # Cases with a waiting time check a lower bound as well (host-silent at least
 # 14 s, host-leaves at least 9 s), so that shortening the start-up limits in mmulti_vnet.c is noticed.
+#
+# (Duke only: -relay, -room and -host-room outside -net are refused; the game's option parser would take
+# them for -r (record a demo) and -h (a DEF file).)
 #
 # What happens today with plain -net (for comparison): a -net that cannot be
 # set up (bad arguments, an unresolvable host) prints "mmulti error: ..." and
@@ -83,6 +86,8 @@ expect_fail relay-alone 5 'exactly one of' -net -relay "127.0.0.1:$rport" -- $au
 expect_fail relay-url 5 'not the URL' -net -relay "wss://example.org/vnet" -room ABCDE2 -- $auto
 expect_fail hostroom-one 5 'number of players from 2' -net -relay "127.0.0.1:$rport" -host-room 1 -- $auto
 expect_fail hostroom-word 5 'number of players from 2' -net -relay "127.0.0.1:$rport" -host-room many -- $auto
+expect_fail relay-outside-net 5 'is a network option: give it after -net' -relay "127.0.0.1:$rport" -host-room 2 -v1 -l1
+expect_fail room-outside-net 5 'is a network option: give it after -net' -room ABCDE2 -v1 -l1
 expect_fail relay-unresolvable 12 'cannot resolve relay host no-such-host.invalid' -net -relay "no-such-host.invalid:7777" -room ABCDE2 -- $auto
 
 t_note "the relay is not running"
@@ -130,7 +135,7 @@ t_game hostS "$t_tmp/hostS" --game "$game" --timeout 80 -- -net -relay "127.0.0.
 hostspid=$game_pid
 t_wait_for "$t_tmp/hostS/duke3d.log" 'room code [A-Z0-9]{6}' 20 || t_bad "the silent host printed no room code"
 codes="$(grep -o 'room code [A-Z0-9]*' "$t_tmp/hostS/duke3d.log" | head -1 | awk '{print $3}')"
-gamepid="$(pgrep -P "$hostspid" -x duke3d | head -1)"
+gamepid="$(pgrep -P "$hostspid" -x "$(basename "$game" | cut -c1-15)" | head -1)"
 if [ -n "$gamepid" ]; then kill -STOP "$gamepid"; else t_bad "could not find the silent host's game process"; fi
 minsec=14
 expect_fail host-silent 25 'the host did not answer' -net -relay "127.0.0.1:$((rport + 1))" -room "$codes" -- $auto
@@ -149,7 +154,7 @@ t_game joiner "$t_tmp/joiner" --game "$game" --timeout 80 -- -net -relay "127.0.
 joinerpid=$game_pid
 t_wait_for "$t_tmp/joiner/duke3d.log" 'mmulti: Player 0 is here' 20 || t_bad "the joiner did not meet the host"
 # the game process itself (a child of the run-headless script) vanishes without a word
-gamepid="$(pgrep -P "$host2pid" -x duke3d | head -1)"
+gamepid="$(pgrep -P "$host2pid" -x "$(basename "$game" | cut -c1-15)" | head -1)"
 if [ -n "$gamepid" ]; then kill -KILL "$gamepid"; else t_bad "could not find the host's game process"; fi
 t0=$(date +%s.%N)
 t_wait_pid "$joinerpid" 40; st=$t_status

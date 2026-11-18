@@ -40,7 +40,7 @@ Verified in brief 00: see [`code-facts.md`](code-facts.md), with file:line for e
 
 ## 3. Settled decisions
 
-Don't reopen these inside a brief. If one proves wrong, stop and ask the user. (The same list, with D13, is in [`README.md`](README.md).)
+Don't reopen these inside a brief. If one proves wrong, stop and ask the user. (The same list, with D13 and D14, is in [`README.md`](README.md).)
 
 - **D1. The browser is the end goal.** The native Linux build must keep working, and native players must be able to join browser rooms.
 - **D2. No joining mid-game.** The player count is fixed when the game starts.
@@ -55,6 +55,7 @@ Don't reopen these inside a brief. If one proves wrong, stop and ask the user. (
 - **D11. Licensing:** only the shareware GRP may be offered for public download by default.
 - **D12. Toolchain:** Emscripten 6.0.13.
 - **D13. File names:** `jfduke3d.js`, `jfduke3d.css`, jfSW's `web/` structure.
+- **D14. Shareware network gate:** with the shareware GRP, network games (plain UDP and relay) are refused by default, with a message, unless `[Comm Setup] AllowSharewareNetGames = 1` in `duke3d.cfg` or `-allowsharewarenet` allows them; registered data always allows them. Reason: the shareware licence's `[3][D]` (online multiplayer services need 3D Realms' written permission), so shareware netplay is for LANs only. Tests on shareware data turn the option on. Every entry point asks `NetGameAllowed()`.
 - **The forks are shared with jfSW** (README, "Working across repos").
 - **Relay games are master/slave** (D5): Duke's M/S code is the `!networkmode` paths of `game.c` (`code-facts.md` §3.1).
 

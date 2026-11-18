@@ -3,7 +3,7 @@
 #
 # Test 3: plain UDP (-net, no relay) is unchanged.
 #
-#   tests/net/test-udp-unchanged.sh --base-game FILE [--mutate-wire]
+#   tests/net/test-udp-unchanged.sh --base-game FILE [--game FILE] [--mutate-wire]
 #
 # --mutate-wire (for the "does it bite" proof): the old mmulti.c is changed to
 # answer a slave's first contact with another byte (0xac for 0xab), which the
@@ -36,10 +36,11 @@
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-base_game=""; mutate=""
+base_game=""; mutate=""; new_game="$root/duke3d"
 while [ $# -gt 0 ]; do
     case "$1" in
         --base-game) base_game="$2"; shift 2 ;;
+        --game) new_game="$2"; shift 2 ;;
         --mutate-wire) mutate=1; shift ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
@@ -124,7 +125,7 @@ mm() { grep -h '^mmulti:' "$1/duke3d.log" | sed 's/Player [0-9]* is here/Player 
 
 game3 old "$base_game" "$base_game" "$base_game" 45
 for n in 0 1 2; do t_check "old binary, process $n ran until stopped (exit ${st[$n]}, want 124)" test "${st[$n]}" -eq 124; done
-game3 new "$root/duke3d" "$root/duke3d" "$root/duke3d" 45
+game3 new "$new_game" "$new_game" "$new_game" 45
 for n in 0 1 2; do t_check "new binary, process $n ran until stopped (exit ${st[$n]}, want 124)" test "${st[$n]}" -eq 124; done
 for n in 0 1 2; do
     t_check "process $n prints the same mmulti lines with the old and the new binary" test "$(mm "$t_tmp/old-$n")" = "$(mm "$t_tmp/new-$n")"
@@ -135,12 +136,12 @@ t_check "the master saw both players join (old)" test "$(grep -c 'mmulti: Player
 
 # Mixed: the side that is new quits after 600 tics by itself. (No -testsync: the
 # old binary does not know it, and the packets would be misread.)
-game3 mixA "$base_game" "$root/duke3d" "$root/duke3d" 45 -testquit600
+game3 mixA "$base_game" "$new_game" "$new_game" 45 -testquit600
 for n in 1 2; do
     t_check "old master, new slave $n: played 600 tics and quit (exit ${st[$n]})" test "${st[$n]}" -eq 0
     t_check "old master, new slave $n: reached tic 600" grep -q '^TEST: quitting after [0-9]* game tics' "$t_tmp/mixA-$n/duke3d.log"
 done
-game3 mixB "$root/duke3d" "$base_game" "$base_game" 45 -testquit600
+game3 mixB "$new_game" "$base_game" "$base_game" 45 -testquit600
 t_check "new master, old slaves: played 600 tics and quit (exit ${st[0]})" test "${st[0]}" -eq 0
 t_check "new master, old slaves: reached tic 600" grep -q '^TEST: quitting after [0-9]* game tics' "$t_tmp/mixB-0/duke3d.log"
 
