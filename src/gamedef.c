@@ -2700,6 +2700,7 @@ char parse(void)
         case 37:    //debris
             {
                 short dnum;
+                int r0, r1, r2, r3, r4, r5, r6, r7;
 
                 insptr++;
                 dnum = *insptr;
@@ -2712,11 +2713,19 @@ char parse(void)
                         s = 0;
                     else s = (TRAND%3);
 
+                    r7 = TRAND&2047;
+                    r6 = TRAND&127;
+                    r5 = TRAND&2047;
+                    r4 = TRAND&15;
+                    r3 = TRAND&15;
+                    r2 = TRAND&8191;
+                    r1 = TRAND&255;
+                    r0 = TRAND&255;
                     l = EGS(g_sp->sectnum,
-                            g_sp->x+(TRAND&255)-128,g_sp->y+(TRAND&255)-128,g_sp->z-(8<<8)-(TRAND&8191),
-                            dnum+s,g_sp->shade,32+(TRAND&15),32+(TRAND&15),
-                            TRAND&2047,(TRAND&127)+32,
-                            -(TRAND&2047),g_i,5);
+                            g_sp->x+r0-128,g_sp->y+r1-128,g_sp->z-(8<<8)-r2,
+                            dnum+s,g_sp->shade,32+r3,32+r4,
+                            r5,r6+32,
+                            -r7,g_i,5);
                     if(g_sp->picnum == BLIMP && dnum == SCRAP1)
                         sprite[l].yvel = weaponsandammosprites[j%14];
                     else sprite[l].yvel = -1;

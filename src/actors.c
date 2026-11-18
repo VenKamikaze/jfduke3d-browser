@@ -575,7 +575,10 @@ void lotsofmoney(spritetype *s, short n)
     short i ,j;
     for(i=n;i>0;i--)
     {
-        j = EGS(s->sectnum,s->x,s->y,s->z-(TRAND%(47<<8)),MONEY,-32,8,8,TRAND&2047,0,0,0,5);
+        int r0, r1;
+        r1 = TRAND&2047;
+        r0 = TRAND%(47<<8);
+        j = EGS(s->sectnum,s->x,s->y,s->z-r0,MONEY,-32,8,8,r1,0,0,0,5);
         sprite[j].cstat = TRAND&12;
     }
 }
@@ -585,7 +588,10 @@ void lotsofmail(spritetype *s, short n)
     short i ,j;
     for(i=n;i>0;i--)
     {
-        j = EGS(s->sectnum,s->x,s->y,s->z-(TRAND%(47<<8)),MAIL,-32,8,8,TRAND&2047,0,0,0,5);
+        int r0, r1;
+        r1 = TRAND&2047;
+        r0 = TRAND%(47<<8);
+        j = EGS(s->sectnum,s->x,s->y,s->z-r0,MAIL,-32,8,8,r1,0,0,0,5);
         sprite[j].cstat = TRAND&12;
     }
 }
@@ -595,7 +601,10 @@ void lotsofpaper(spritetype *s, short n)
     short i ,j;
     for(i=n;i>0;i--)
     {
-        j = EGS(s->sectnum,s->x,s->y,s->z-(TRAND%(47<<8)),PAPER,-32,8,8,TRAND&2047,0,0,0,5);
+        int r0, r1;
+        r1 = TRAND&2047;
+        r0 = TRAND%(47<<8);
+        j = EGS(s->sectnum,s->x,s->y,s->z-r0,PAPER,-32,8,8,r1,0,0,0,5);
         sprite[j].cstat = TRAND&12;
     }
 }
@@ -628,8 +637,14 @@ void guts(spritetype *s,short gtype, short n, short p)
 
     for(j=0;j<n;j++)
     {
+        int r0, r1, r2, r3, r4;
         a = TRAND&2047;
-        i = EGS(s->sectnum,s->x+(TRAND&255)-128,s->y+(TRAND&255)-128,gutz-(TRAND&8191),gtype,-32,sx,sy,a,48+(TRAND&31),-512-(TRAND&2047),ps[p].i,5);
+        r4 = TRAND&2047;
+        r3 = TRAND&31;
+        r2 = TRAND&8191;
+        r1 = TRAND&255;
+        r0 = TRAND&255;
+        i = EGS(s->sectnum,s->x+r0-128,s->y+r1-128,gutz-r2,gtype,-32,sx,sy,a,48+r3,-512-r4,ps[p].i,5);
         if(PN == JIBS2)
         {
             sprite[i].xrepeat >>= 2;
@@ -661,8 +676,11 @@ void gutsdir(spritetype *s,short gtype, short n, short p)
 
     for(j=0;j<n;j++)
     {
+        int r0, r1;
         a = TRAND&2047;
-        EGS(s->sectnum,s->x,s->y,gutz,gtype,-32,sx,sy,a,256+(TRAND&127),-512-(TRAND&2047),ps[p].i,5);
+        r1 = TRAND&2047;
+        r0 = TRAND&127;
+        EGS(s->sectnum,s->x,s->y,gutz,gtype,-32,sx,sy,a,256+r0,-512-r1,ps[p].i,5);
     }
 }
 
@@ -1779,7 +1797,13 @@ void movestandables(void)
 
             for(k=0;k<16;k++)
             {
-                j = EGS(SECT,SX,SY,SZ-(TRAND%(48<<8)),SCRAP3+(TRAND&3),-8,48,48,TRAND&2047,(TRAND&63)+64,-(TRAND&4095)-(sprite[i].zvel>>2),i,5);
+                int r0, r1, r2, r3, r4;
+                r4 = TRAND&4095;
+                r3 = TRAND&63;
+                r2 = TRAND&2047;
+                r1 = TRAND&3;
+                r0 = TRAND%(48<<8);
+                j = EGS(SECT,SX,SY,SZ-r0,SCRAP3+r1,-8,48,48,r2,r3+64,-r4-(sprite[i].zvel>>2),i,5);
                 sprite[j].pal = 2;
             }
 
@@ -3499,7 +3523,11 @@ void moveactors(void)
                         if(j == FREEZEBLAST) goto BOLT;
                         for(j=16; j >= 0 ;j--)
                         {
-                            k = EGS(SECT,SX,SY,SZ,GLASSPIECES+(j%3),-32,36,36,TRAND&2047,32+(TRAND&63),1024-(TRAND&1023),i,5);
+                            int r0, r1, r2;
+                            r2 = TRAND&1023;
+                            r1 = TRAND&63;
+                            r0 = TRAND&2047;
+                            k = EGS(SECT,SX,SY,SZ,GLASSPIECES+(j%3),-32,36,36,r0,32+r1,1024-r2,i,5);
                             sprite[k].pal = 1;
                         }
                         spritesound(GLASS_BREAKING,i);
@@ -3536,7 +3564,12 @@ void moveactors(void)
                     {
                         for(x=0;x<8;x++)
                         {
-                            j = EGS(sect,s->x,s->y,s->z-(8<<8),SCRAP3+(TRAND&3),-8,48,48,TRAND&2047,(TRAND&63)+64,-(TRAND&4095)-(s->zvel>>2),i,5);
+                            int r0, r1, r2, r3;
+                            r3 = TRAND&4095;
+                            r2 = TRAND&63;
+                            r1 = TRAND&2047;
+                            r0 = TRAND&3;
+                            j = EGS(sect,s->x,s->y,s->z-(8<<8),SCRAP3+r0,-8,48,48,r1,r2+64,-r3-(s->zvel>>2),i,5);
                             sprite[j].pal = 6;
                         }
 
@@ -3649,7 +3682,12 @@ void moveactors(void)
 
                         for(x=0;x<8;x++)
                         {
-                            j = EGS(sect,s->x,s->y,s->z-(8<<8),SCRAP3+(TRAND&3),-8,48,48,TRAND&2047,(TRAND&63)+64,-(TRAND&4095)-(s->zvel>>2),i,5);
+                            int r0, r1, r2, r3;
+                            r3 = TRAND&4095;
+                            r2 = TRAND&63;
+                            r1 = TRAND&2047;
+                            r0 = TRAND&3;
+                            j = EGS(sect,s->x,s->y,s->z-(8<<8),SCRAP3+r0,-8,48,48,r1,r2+64,-r3-(s->zvel>>2),i,5);
                             sprite[j].pal = 6;
                         }
                         t[0] = -3;
