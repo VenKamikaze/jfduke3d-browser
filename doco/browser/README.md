@@ -35,7 +35,7 @@ Later, not briefed: music (decision below), WebGL rendering through the GLES2 pa
 
 ## Settled decisions
 
-Don't reopen these inside a brief. If one proves wrong, stop and ask the user. D1 to D12 are jfSW's, adapted.
+Don't reopen these inside a brief. If one proves wrong, stop and ask the user. D1 to D12 are jfSW's, adapted; D13 and D14 are Duke's.
 
 - **D1. The browser is the end goal.** The native Linux build must keep working, and native players must be able to join browser rooms.
 - **D2. No joining mid-game.** The player count is fixed when the game starts, as it is today.
@@ -50,6 +50,7 @@ Don't reopen these inside a brief. If one proves wrong, stop and ask the user. D
 - **D11. Licensing:** only the shareware GRP may be offered for public download by default. Hosting registered data is the user's call. (The shareware licence's wording on multiplayer services is in `00-setup.md`, Outcome, "Licence"; brief 06 deals with it.)
 - **D12. Toolchain:** Emscripten 6.0.13, as Bit Riot and jfSW pin. `scripts/setup-emsdk.sh` is jfSW's, renamed.
 - **D13. File names.** The page files are `jfduke3d.js` and `jfduke3d.css`, with jfSW's structure (`web/` with `config.js`, `data.js`, `grptable.js`, `index.html`). The wasm output is `jfduke3d.*`.
+- **D14. Shareware network gate (user decision, 18 Nov 2026).** With the shareware GRP, network games are **refused by default**, with a clear message, whether plain UDP or through a relay, unless the player allows them: `[Comm Setup] AllowSharewareNetGames = 1` in `duke3d.cfg` (default 0) or `-allowsharewarenet` on the command line (before `-net`). Registered data (any GRP that is not the shareware one) always allows them. The reason is the shareware licence's `[3][D]` clause on an "online service providing multiplayer use" (`00-setup.md`, Outcome, "Licence"): shareware netplay is meant only for LAN deployments. The tests that run on shareware data turn the option on explicitly. The browser's equivalent (a `config.js` setting that adds the argument) and hiding the menu and console Host/Join entries when it is off are later briefs; every entry point must ask `NetGameAllowed()` (`src/netgame.h`). (Numbered D14 because D13 is the file names.)
 
 ## Answers to the open questions (18 Nov 2026)
 

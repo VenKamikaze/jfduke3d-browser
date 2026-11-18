@@ -82,6 +82,7 @@ int32 ScreenWidth = 640;
 int32 ScreenHeight = 480;
 int32 ScreenBPP = 8;
 int32 ForceSetup = 1;
+int32 AllowSharewareNet = 0;    // [Comm Setup] AllowSharewareNetGames: network games with the shareware GRP (netgame.h, D14)
 
 static char setupfilename[256]={SETUPFILENAME};
 static int32 scripthandle = -1;
@@ -595,6 +596,7 @@ int32 CONFIG_ReadSetup( void )
     }
     SCRIPT_GetString( scripthandle, "Comm Setup","PlayerName",myname, sizeof(myname));
     SCRIPT_GetString( scripthandle, "Comm Setup","RTSName",ud.rtsname, sizeof(ud.rtsname));
+    SCRIPT_GetNumber( scripthandle, "Comm Setup","AllowSharewareNetGames",&AllowSharewareNet);
 
     SCRIPT_GetNumber( scripthandle, "Screen Setup", "Shadows",&ud.shadows);
     SCRIPT_GetString( scripthandle, "Screen Setup", "Password",ud.pwlockout, sizeof(ud.pwlockout));
@@ -699,6 +701,7 @@ void CONFIG_WriteSetup( void )
     if (scripthandle < 0)
         scripthandle = SCRIPT_Init(setupfilename);
 
+    SCRIPT_PutNumber( scripthandle, "Comm Setup", "AllowSharewareNetGames",AllowSharewareNet,false,false);
     SCRIPT_PutNumber( scripthandle, "Screen Setup", "Shadows",ud.shadows,false,false);
     SCRIPT_PutString( scripthandle, "Screen Setup", "Password",ud.pwlockout);
     SCRIPT_PutNumber( scripthandle, "Screen Setup", "Detail",ud.detail,false,false);

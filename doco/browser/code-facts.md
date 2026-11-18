@@ -297,3 +297,48 @@ What the write-up says that the code contradicts, or that needs a qualification.
 
 - The engine's Emscripten hooks are named `Module.jfsw*` (§10). Either the Duke page provides the same names, or a rename in the shared fork serves both pages (a change to both games' tests).
 - The shareware licence's section [3][D] reads as if "online service providing multiplayer use" needs 3D Realms' written permission; see `00-setup.md`, Outcome, "Licence".
+
+## 15. What brief 01 added and learnt
+
+Brief 01 (`01-native-relay.md`) changed the game only; line numbers are `src/` at `browser/01-native-relay`. New files: `src/netgame.c`/`.h` (the shareware gate, relay failures, the sync log) and `src/testhooks.c`/`.h` (test-only hooks).
+
+### 15.1 Where things are now
+
+- **Arguments** (`checkcommandline`, `src/game.c`): `-testquit<N>`, `-testsync`, `-testnudge<T>`, `-testdump<name>`, `-teststate[<T>]` and `-allowsharewarenet` are matched **before** the big `switch (*c)`. They have to be: any other `-t…` is the respawn option (`case 't'`, "Respawn on"), `-a…` is "other player AI", `-r…` records a demo and `-h…` names a DEF file. For the same reason `-relay`, `-room` and `-host-room` **outside `-net`** are refused with a message (`-net`'s branch skips them when they follow it). **Test-only arguments, and `-allowsharewarenet`, go after `--` (or before `-net`)**: what follows `-net` up to `--` belongs to mmulti (§3.2).
+- **`app_main`**: the early gate before `initmultiplayersparms` (`NetGameAllowedFor(gamegrp->game)`, only when no startup window will run; nothing has been opened, so a refused relay host makes no room), then `NetFailIfRelayFailed()` when the arguments are bad (so the game exits 1 instead of starting a single player game), the authoritative gate after **every** group file is mounted, `-g` extras included (`NetGameAllowed()` -> `NetDataIsShareware()`: `VOLUMEONE` or a `DUKESW.BIN` openable from anywhere; covers the startup window's Join and Host; `gametype` is never changed: a `-g` shareware GRP with no main GRP leaves `gametype` DUKE, i.e. the game believes it is registered), `Startup()`: `mmulti_vnet_setplayercap(VOLUMEONE ? 4 : MAXPLAYERS)` before the wait and `NetFailIfRelayFailed()` after it. The engine's own limit for `-host-room` is **8** (`MAXROOMPLAYERS`, `jfbuild/src/mmulti_vnet.c`), though the game allows 16 over plain UDP.
+- **Main loop and `waitforeverybody`** call `NetLostCheck()` (relay session FAILED and `movefifoplc` unchanged for 2 s: message, `uninitmultiplayers()`, exit 1). Nothing tells the *other* players: a host that vanishes still stalls the rest (as jfSW's L18 left it).
+- **`checksync()`** calls `NetSyncDiffers()` and `NetSyncChecked()`: `GAME OUT OF SYNC: sync check N (tic T), player P differs from the master` is logged for the first difference of each run of mismatches (§2.5's "on the screen only" is no longer true), and `NetSyncChecks` / `NetSyncMismatches` count. **Every machine compares** (§13, item 3): the master each slave's byte against its own; a slave its own against the master's, so a slave other than the diverging one never sees it (`test-desync.sh`).
+- **`domovethings()`**: `TestTicHook()` just before `lockclock += TICSPERFRAME` (after the multiplayer save/load block, which can `return 1` without running a tic): the `-testnudge` and the `-testdump` record, before `movefifoplc++`; the sync byte is `TestSyncByte()` instead of the usual one when `-testsync` is on, taken **every tic** (`syncval` is a ring of `MOVEFIFOSIZ` = 256 bytes, so at most 256 tics may be in flight); `TestTicEnd()` just before `return 0`: `-testquit`. A quit calls `gameexit("")`, which skips the shareware order screens and the deathmatch totals (`*t == 0`), still runs `allowtimetocorrecterrorswhenquitting()` (about 0.3 s) and writes the config; before it a network game keeps acknowledging and resending for 1.5 s so a player a few tics behind can finish.
+- **Packet 6** carries `BYTEVERSION + TestVersionSalt()` (8 with `-testsync`, else 0), checked on receipt: a player without the same `-testsync` is refused ("You cannot play Duke with different versions."). `-testquit` values need not match (a player that stops early stops the others, as in jfSW).
+- **The tic counter** in `-testdump` and `-testquit` is `movefifoplc` (+1 in the dump), which `clearfifo()` zeroes in `enterlevel`, so it starts again at 1 in each level. It is the same in single player and in demo playback (`playback()` calls `domovethings()` too).
+- The `.state` text (`-teststate`) and the hashes are made from one list of fields (`WalkState`, `src/testhooks.c`).
+
+### 15.2 The `-testdump` file
+
+`<name>`, 32 bytes per game tic, eight little endian 32 bit words: `tic` (1-based, from the start of the level), `randomseed`, then 32 bit FNV-1a hashes (over little endian 32 bit words) of `players` (`ps[]` of every connected player), `sprites` (every sprite in use, and the status and sector list orders), `hittype` (`hittype[]` of the sprites in use), `sectors`, `walls` and `other` (`ud`'s game fields, `global_random`, `everyothertime`, `earthquaketime`, the animation, cycler, animated wall and sprite-queue tables, `frags`, `po[]`, the player list). The record is of the state **before** the tic is moved. jfSW's record is 17 bytes (tic, nine sync bytes, one hash); Duke's has more parts because Duke has no nine sync functions and because a test that finds a difference should say which table. `tests/tools/testdump.py diff A B` prints the first differing tic and parts.
+
+### 15.3 State that differs between machines (found by running two machines and diffing; input for A1)
+
+Each was the **first difference** two idle machines showed, and each is left out of the hash with a comment in `src/testhooks.c`:
+
+1. `hittype[i].dispicnum`: written by `animatesprites()` (`src/game.c:5747-5760`, `:5934`) to the picture last drawn, so it is what this machine has drawn so far. Drawing writes the simulation's tables.
+2. `sprite[i].yoffset` of a player's sprite (`statnum` 10): `animatesprites()` writes it while the player is in the air (`src/game.c:5594-5595`).
+3. `hittype[i].temp_data[0..5]` of the ambient sound sprites (`statnum` 11, `MUSICANDSFX`): `movefx()` (`src/actors.c:1158`) keeps T1, T2 and T5 as audio bookkeeping from this machine's `SoundToggle`, `AmbienceToggle`, free voices and the view point (§7's table). They differed every 119 tics in the first 2-player run.
+4. `ps[].aim_mode`, `auto_aim`, `weaponswitch` (and `ud.wchoice`) of other players on a slave: bug **D1**. Not a local setting: a real disagreement about the game's state in games of three or more.
+5. `ps[].actors_killed` and `max_actors_killed`: credited to `ps[myconnectindex]` for any kill (§7's table). Not observed to differ in the runs (the kills are few); left out because the code says they will.
+6. Left out **without** having seen them differ, because the code says they are a machine's own: `ps[].palette` (a pointer), `gm`, `fta`, `ftq` (the on-screen message), `zoom`, `visibility`, `pals`, `refresh_inventory`, `name`. A1 should check them. (`pals_time` is hashed: deterministic; `loogiex`/`loogiey` stay out because `actors.c:2498` reads the local `xdim`.)
+
+With these left out, 2, 3 and 4 idle players over a relay and 2 and 3 over UDP agree on every tic for 450 to 1500 tics, and a 3-player game ran 2795 tics without the hang jfSW found at tic 1522 (F1).
+
+### 15.4 Demos
+
+- **A recording game's dump differs from its playback's** (bug **D2**): the camera effectors (SE 27) are spawned visible only while `ud.recstat == 1` (`src/game.c:4671-4676`). Two playbacks of one demo give identical dumps.
+- Playback of a demo goes through the logo first (about 15 s on shareware with no key press), then plays at the game's pace; `-testquit` ends it. A demo records only inputs, so an idle recording (what a headless run makes) is a weak determinism check; a later brief should record real play (jfSW's `tests/tools/synth_input.c` shows how).
+- `-r` and `-testdump` work together; `closedemowrite()` runs from `gameexit("")`, so a `-testquit` run leaves a whole `demo1.dmo`.
+
+### 15.5 Other things seen
+
+- **The slot a joiner takes** is the order its first ping reaches the master (engine; as in jfSW), so "the third process started" need not be player 2: tests wait for the previous joiner before starting the next one when it matters (`test-desync.sh`).
+- `wm_msgbox` with no display prints its text to stdout as well, so a refusal or failure shows twice in a headless log. Harmless.
+- `-allowsharewarenet` and the cfg key are read before the GRP is identified; the game's `VOLUMEONE` limits (4 players, episode 1) are separate and unchanged.
+- `make test` runs the baseline build, which does `git worktree add` on this repository and fetches the submodules from the forks (needs the network, once).

@@ -35,6 +35,9 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 #include "osdcmds.h"
 #include "startwin.h"
 #include "grpscan.h"
+#include "mmulti_vnet.h"
+#include "netgame.h"
+#include "testhooks.h"
 
 #include "util_lib.h"
 
@@ -639,7 +642,7 @@ void getpackets(void)
                     debugprintf("getpackets: player %d announcement with mismatched index %d.\n",
                         other, packbuf[1]);
 
-                if (packbuf[2] != BYTEVERSION)
+                if (packbuf[2] != BYTEVERSION + TestVersionSalt())
                     gameexit("\nYou cannot play Duke with different versions.");
 
                 for (i=3,j=0; packbuf[i] && i<packbufleng; i++)
@@ -1101,7 +1104,11 @@ void checksync(void)
                      for(i=connectpoint2[connecthead];i>=0;i=connectpoint2[i])
                             if (syncval[i][syncvaltottail&(MOVEFIFOSIZ-1)] !=
                                 syncval[connecthead][syncvaltottail&(MOVEFIFOSIZ-1)])
+                            {
                                  syncstat = 1;
+                                 NetSyncDiffers(syncvaltottail, i);     // logs it: the message below is only drawn
+                            }
+                     NetSyncChecked(syncvaltottail);
                      syncvaltottail++;
                      for(i=connecthead;i>=0;i=connectpoint2[i])
                             if (syncvalhead[i] == syncvaltottail) break;
@@ -6928,6 +6935,9 @@ void comlinehelp(void)
         ARGCHAR "setup\t\tDisplays the configuration dialogue box\n"
         ARGCHAR "nosetup\t\tPrevents display of the configuration dialogue box\n"
         ARGCHAR "net\t\tNet mode game (see documentation)\n"
+        ARGCHAR "net -relay HOST:PORT -host-room N\tNet game through a vnet relay: host a room for N players\n"
+        ARGCHAR "net -relay HOST:PORT -room CODE\tNet game through a vnet relay: join a room\n"
+        ARGCHAR "allowsharewarenet\tAllow net games with the shareware version (see the licence)\n"
         ;
     wm_msgbox("JFDuke3D", "%s", s);
 }
@@ -6976,6 +6986,33 @@ void checkcommandline(int argc, char const * const *argv)
                     for (; i<argc; i++)
                         if (!strcmp(argv[i], "--")) break;
                     endnetparam = i;
+                }
+                else if (!Bstrcasecmp(c,"relay") || !Bstrcasecmp(c,"room") || !Bstrcasecmp(c,"host-room")) {
+                    // These are -net sub-options (mmulti_vnet.h): the -net branch above skips them.
+                    // On their own they would be taken for -r (record a demo) or -h (a DEF file).
+                    buildprintf("-%s is a network option: give it after -net, for example\n"
+                        "    -net -relay HOST:PORT -host-room N   or   -net -relay HOST:PORT -room CODE\n", c);
+                    wm_msgbox("JFDuke3D", "-%s is a network option: give it after -net, for example\n"
+                        "-net -relay HOST:PORT -host-room N  or  -net -relay HOST:PORT -room CODE", c);
+                    exit(1);
+                }
+                else if (!Bstrcasecmp(c,"allowsharewarenet")) {
+                    AllowSharewareNetCmd = 1;   // D14: allow net games with the shareware GRP (netgame.h)
+                }
+                else if (!Bstrncasecmp(c,"testquit",8)) {
+                    TestQuitArg(atoi(c+8));     // test-only (testhooks.h): quit cleanly after N game tics
+                }
+                else if (!Bstrcasecmp(c,"testsync")) {
+                    TestSyncArg();              // test-only: a sync byte of the whole state every tic
+                }
+                else if (!Bstrncasecmp(c,"testnudge",9)) {
+                    TestNudgeArg(atoi(c+9));    // test-only: a deliberate desync of this player at tic T
+                }
+                else if (!Bstrncasecmp(c,"testdump",8)) {
+                    TestDumpArg(c+8);           // test-only: this machine's per-tic record of the state, to a file
+                }
+                else if (!Bstrncasecmp(c,"teststate",9)) {
+                    TestStateArg(atoi(c+9));    // test-only: with -testdump, the state as text
                 }
                 else if (!Bstrcasecmp(c,"name")) {
                     if (argc > i+1) {
@@ -7566,6 +7603,7 @@ void Startup(void)
 
     if (netsuccess) {
         buildprintf("Waiting for players...\n");
+        mmulti_vnet_setplayercap(VOLUMEONE ? 4 : MAXPLAYERS);   // for -net -relay ... -host-room N
         while (initmultiplayerscycle()) {
             handleevents();
             if (quitevent) {
@@ -7573,6 +7611,8 @@ void Startup(void)
                 return;
             }
         }
+        // The relay refused us, could not be reached, or the host is gone.
+        NetFailIfRelayFailed();
     } else {
         initsingleplayers();
     }
@@ -7603,7 +7643,7 @@ void getnames(void)
      {
           tempbuf[0] = 6;
           tempbuf[1] = myconnectindex;
-          tempbuf[2] = BYTEVERSION;
+          tempbuf[2] = BYTEVERSION + TestVersionSalt();     // (test-only: -testsync changes the packets)
           l = 3;
 
               //null terminated player name to send
@@ -7784,7 +7824,21 @@ int app_main(int argc, char const * const argv[])
     gamegrp = IdentifyGroup(duke3dgrp);
 
     if (netparam) { // -net parameter on command line.
+        int startwinwillrun =
+#ifdef HAVE_STARTWIN
+            (configloaded < 0 || (ForceSetup && CommandSetup == 0) || (CommandSetup > 0));
+#else
+            0;
+#endif
+        // D14: the shareware GRP does not get network games unless they are allowed. Refuse
+        // before anything is opened (a relay room is made as soon as the arguments are read), but
+        // only when nothing can change the GRP afterwards: the startup window may pick another
+        // one. The authoritative check is below, once every group file is mounted.
+        if (gamegrp && !startwinwillrun && !NetGameAllowedFor(gamegrp->game)) NetRefuseShareware();
         netsuccess = initmultiplayersparms(endnetparam - netparam, &argv[netparam]);
+        // A bad -relay, -host-room or -room (mmulti has said what): do not fall back to a
+        // single player game the way a plain -net failure does.
+        if (!netsuccess) NetFailIfRelayFailed();
     }
 
 #ifdef HAVE_STARTWIN
@@ -7892,6 +7946,11 @@ int app_main(int argc, char const * const argv[])
             CommandGrps = s;
         }
     }
+
+    // D14, the authoritative check: on the data that is really mounted (the startup window may have
+    // chosen another GRP or started a network game, an unidentified GRP is only guessed at above, and
+    // a -g group file can bring shareware data that gametype does not know about)
+    if (netsuccess && !NetGameAllowed()) NetRefuseShareware();
 
     RegisterShutdownFunction( Shutdown );
 
@@ -8053,6 +8112,7 @@ if (VOLUMEONE) {
         }
 
         OSD_DispatchQueued();
+        NetLostCheck();     // a relay session lost during the game ends it (L18)
 
         if( ud.recstat == 2 || ud.multimode > 1 || ( ud.show_help == 0 && (ps[myconnectindex].gm&MODE_MENU) != MODE_MENU ) )
             if( ps[myconnectindex].gm&MODE_GAME )
@@ -9009,6 +9069,8 @@ char domovethings(void)
         }
     }
 
+    TestTicHook();      // test-only (testhooks.h): a tic is going to run
+
     ud.camerasprite = -1;
     lockclock += TICSPERFRAME;
 
@@ -9082,11 +9144,12 @@ char domovethings(void)
               gameexit( " \nThe 'MASTER/First player' just quit the game.  All\nplayers are returned from the game. This only happens in 5-8\nplayer mode as a different network scheme is used.");
       }
 
-      if ((numplayers >= 2) && ((movefifoplc&7) == 7))
+      if ((numplayers >= 2) && (TestSyncOn || (movefifoplc&7) == 7))
       {
             ch = (unsigned char)(randomseed&255);
             for(i=connecthead;i>=0;i=connectpoint2[i])
                  ch += ((ps[i].posx+ps[i].posy+ps[i].posz+ps[i].ang+ps[i].horiz)&255);
+            if (TestSyncOn) ch = TestSyncByte();    // test-only: the whole state, every tic
             syncval[myconnectindex][syncvalhead[myconnectindex]&(MOVEFIFOSIZ-1)] = ch;
             syncvalhead[myconnectindex]++;
       }
@@ -9137,6 +9200,7 @@ char domovethings(void)
         pan3dsound();
     }
 
+    TestTicEnd();       // test-only: -testquit
 
     return 0;
 }
