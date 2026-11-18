@@ -30,6 +30,19 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 
 int conversion = 13;    // by default we think we're 1.3d until compilation informs us otherwise
 
+// Where the CON scripts come from. kopen4load()'s second argument (jfbuild/src/cache1d.c): 0 looks on disk first, so a
+// loose GAME.CON, DEFS.CON or USER.CON (or any file -x names) overrides the one in the GRP; 1 looks in the first group
+// file only. The browser build takes its CON scripts from the GRP only (doco/browser/README.md, D8): the page never
+// writes a loose script, and this makes the game ignore one that is there. The one exception is test mode: the page
+// passes -testloosecon (sets LooseConAllowed), for a test that puts a loose script in the game's folder. Elsewhere
+// nothing changes (a CON still comes from disk first, then from the GRP).
+int LooseConAllowed = 0;
+#ifdef __EMSCRIPTEN__
+#define CONFROMGRPONLY (LooseConAllowed ? loadfromgrouponly : 1)
+#else
+#define CONFROMGRPONLY loadfromgrouponly
+#endif
+
 extern short otherp;
 
 static short total_lines,line_number;
@@ -806,7 +819,7 @@ char parsecommand(void)
                 char parentcompilefile[255];
                 int fp;
 
-                fp = kopen4load(buf,loadfromgrouponly);
+                fp = kopen4load(buf,CONFROMGRPONLY);
                 if(fp < 0)
                 {
                     error++;
@@ -1639,10 +1652,10 @@ void loadefs(const char *filenam)
     int i;
     int fs,fp;
 
-    fp = kopen4load(filenam,loadfromgrouponly);
+    fp = kopen4load(filenam,CONFROMGRPONLY);
     if( fp == -1 )
     {
-        if( loadfromgrouponly == 1 )
+        if( CONFROMGRPONLY == 1 )
             gameexit("\nMissing con file(s).");
         else {
             char msg[255];
@@ -1698,7 +1711,7 @@ void loadefs(const char *filenam)
 
     if( error == 0 && warning != 0)
     {
-        if( groupfile != -1 && loadfromgrouponly == 0 )
+        if( groupfile != -1 && CONFROMGRPONLY == 0 )
         {
             //buildprintf("Warnings found when compiling CON files. Use default CONs instead? (Y/N)\n");
         i=wm_ynbox("CON File Compilation Warning", "Warnings found when compiling CON files. Use default CONs instead?");
@@ -1714,13 +1727,13 @@ void loadefs(const char *filenam)
 
     if(error)
     {
-        if( loadfromgrouponly )
+        if( CONFROMGRPONLY )
         {
             gameexit("Error compiling CON files.");
         }
         else
         {
-            if( groupfile != -1 && loadfromgrouponly == 0 )
+            if( groupfile != -1 && CONFROMGRPONLY == 0 )
             {
                 //buildprintf("Errors found when compiling CON files.  Use default CONs instead? (Y/N)\n");
                 i=wm_ynbox("CON File Compilation Error", "Errors found when compiling CON files. Use default CONs instead?");
