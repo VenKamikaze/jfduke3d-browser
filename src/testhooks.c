@@ -35,10 +35,11 @@ int TestSyncTic(int index)
 // machines disagreeing also finds which part of the state they disagree about:
 //   players   ps[] of every connected player: all of the simulation's fields, but not the ones that
 //             are a machine's own (palette pointer, gm, the on-screen message fta/ftq, zoom,
-//             visibility, the flash colour pals, refresh_inventory, name), not the
-//             announced settings aim_mode/auto_aim/weaponswitch (bugs.md D1), and not the
+//             visibility, the flash colour pals, refresh_inventory), and not the
 //             kill statistics actors_killed / max_actors_killed (actors.c credits every kill to
-//             ps[myconnectindex], so they differ between machines: A1's list)
+//             ps[myconnectindex], so they differ between machines: A1's list). The settings
+//             each player announces (packet 6: aim_mode, auto_aim, weaponswitch, ud.wchoice and
+//             the name) are in it: every machine must hold every player's (bugs.md D1, fixed)
 //   sprites   every sprite in use (statnum < MAXSTATUS): every field (but yoffset of a player's
 //             sprite, statnum 10: the drawing code writes it), and the order of the status lists
 //             and the sector lists (the order the game moves things in)
@@ -94,9 +95,14 @@ static void WalkState(emit_fn e)
         P(bobposx); P(bobposy); P(oposx); P(oposy); P(oposz); P(pyoff); P(opyoff);
         P(posxv); P(posyv); P(poszv); P(last_pissed_time); P(truefz); P(truecz);
         P(player_par); P(bobcounter); P(weapon_sway); P(randomflamex); P(crack_time); P(pals_time);
-        // not aim_mode, auto_aim and weaponswitch (nor ud.wchoice): a slave sets another slave's from the
-        // master's relay of its announcement (packet 6) as if they were the master's, so in a game
-        // of three or more they differ between machines (bugs.md D1)
+        // the settings each player announced (packet 6): bugs.md D1 had a slave file another slave's
+        // under the master, so that in a game of three or more they differed between machines
+        P(aim_mode); P(auto_aim); P(weaponswitch);
+        for (k = 0; k < 10; k++) { sprintf(nm, "wchoice%d", k); E(PART_PLAYERS, i, nm, ud.wchoice[i][k]); }
+        for (k = 0; k < (int)sizeof(ud.user_name[0]); k++) {
+            sprintf(nm, "name%d", k); E(PART_PLAYERS, i, nm, ud.user_name[i][k]);
+            if (!ud.user_name[i][k]) break;
+        }
         P(ang); P(oang); P(angvel); P(cursectnum); P(look_ang); P(last_extra); P(subweapon);
         for (k = 0; k < MAX_WEAPONS; k++) { sprintf(nm, "ammo_amount%d", k); E(PART_PLAYERS, i, nm, p->ammo_amount[k]); }
         P(wackedbyactor); P(frag); P(fraggedself);
