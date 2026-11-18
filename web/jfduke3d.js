@@ -254,8 +254,9 @@
 
   // The game's list of the GRPs it has checksummed. It is written at every start, with the same text when nothing changed, so it
   // does not count as a change of the folder; but the start that checksums the GRP changes it, and that text must be kept, or the
-  // next visit checksums the GRP again. (That start also writes duke3d.cfg when the music cannot start, which syncs the folder, but
-  // the cache must not depend on that.)
+  // next visit checksums the GRP again. Nothing else need write to the folder in that first visit (duke3d.cfg is written only when
+  // the menu is left or the game ends, code-facts 16.8), and jfSW's page, which leaves this file out, relies on sw.cfg being written
+  // at every start: tests/web/data.js (sabotage nocachesync) shows a first visit that only reaches the menu writes nothing without this.
   function cacheText() {
     try { return String.fromCharCode.apply(null, FS.readFile(HOME_DIR + '/grpfiles.cache')); } catch (e) { return null; }
   }

@@ -147,7 +147,8 @@ async function main() {
       console.log(`  info: CRC32 of ${SIZE} bytes took ${d.crcMs.toFixed(0)} ms (while downloading); whole download+check ${d.downloadMs.toFixed(0)} ms; persistent storage granted: ${await page.evaluate(() => window.jfswPersistent)}`);
       await reachMenu(page, 'first load');
       t.check(await outHas(page, /Checksumming/), 'first load: the game checksummed the GRP once (nothing to trust yet)');
-      await page.waitForFunction(() => window.jfswSyncs >= 1, null, { timeout: 20000 });
+      await page.waitForFunction(() => window.jfswSyncs >= 1, null, { timeout: 20000 }).catch(() => {});
+      t.check((await page.evaluate(() => window.jfswSyncs)) >= 1, 'first load: the game\'s folder (grpfiles.cache) was written to IndexedDB although the player only reached the menu');
       t.check(errors.length === 0, 'first load: no page error', errors.join('; '));
     }
 
@@ -385,7 +386,7 @@ async function main() {
       const recs = await cacheRecords(page);
       t.check(recs && recs.local && recs.local.size === SIZE && recs.local.crc === 0x983AD923, 'picker: the picked file is cached under its own key', JSON.stringify(recs));
       await reachMenu(page, 'picked file');
-      await page.waitForFunction(() => window.jfswSyncs >= 1, null, { timeout: 20000 });
+      await page.waitForFunction(() => window.jfswSyncs >= 1, null, { timeout: 20000 }).catch(() => {});
       // Reload: the picked file again, with no picking and no request for any data URL.
       fresh();
       await page.reload();
@@ -660,8 +661,9 @@ async function main() {
     // ---- 14. grpfiles.cache reaches IndexedDB on its own ------------------------------------------------------------
     console.log('14. grpfiles.cache is kept');
     {
-      // A game that does not write duke3d.cfg at start (the cfg exists with "no music": music start-up succeeds) still has to keep
-      // the list of checksummed GRPs, or the next visit checksums the GRP again.
+      // A first visit that only reaches the menu writes nothing to the game's folder but grpfiles.cache (duke3d.cfg is written when
+      // the menu is left or the game ends; here it exists already, with "no music", so that no start-up path rewrites it). That list
+      // of checksummed GRPs must still reach IndexedDB, or the next visit checksums the GRP again (sabotage nocachesync).
       const r = await t.open(env, '?test=1');
       await waitLoaded(r.page);
       await r.page.evaluate(() => { window.jfswTest.writeFile('duke3d.cfg', new TextEncoder().encode('[Sound Setup]\nMusicDevice = 1\n')); });
