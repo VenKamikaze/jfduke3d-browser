@@ -7759,6 +7759,9 @@ int app_main(int argc, char const * const argv[])
     int i, j;
     int configloaded;
     struct grpfile const *gamegrp = NULL;
+#ifdef __EMSCRIPTEN__
+    int hiddentab = 0;      // the last pass of the main loop was a hidden tab's (HiddenNetPass)
+#endif
 
 #ifndef HAVE_STARTWIN
     (void)configloaded;
@@ -8144,6 +8147,9 @@ if (VOLUMEONE) {
     ud.warp_on = 0;
     KB_KeyDown[sc_Pause] = 0;   // JBF: I hate the pause key
 
+#ifdef __EMSCRIPTEN__
+    hiddentab = 0;
+#endif
     while ( !(ps[myconnectindex].gm&MODE_END) ) //The whole loop!!!!!!!!!!!!!!!!!!
     {
         if (handleevents()) {   // JBF
@@ -8210,6 +8216,23 @@ if (!VOLUMEALL) {
             }
             continue;
         }
+
+#ifdef __EMSCRIPTEN__
+        // A hidden browser tab in a network game: no picture (nobody sees it), and the inputs and
+        // moves are driven by network events (netgame.c, jfbuild/src/sdlayer2.c). A hidden single
+        // player game does not get here: it pauses in the yield.
+        if (jfbuild_browser_hidden_netgame())
+        {
+            hiddentab = 1;
+            HiddenNetPass();
+            continue;
+        }
+        if (hiddentab)
+        {
+            hiddentab = 0;
+            pub = pus = NUMPAGES;      // the borders were not kept up to date
+        }
+#endif
 
         cheats();
         nonsharedkeys();

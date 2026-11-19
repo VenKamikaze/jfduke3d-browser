@@ -59,6 +59,17 @@ void NetFailIfRelayFailed(void);
 // (jfSW's L18.)
 void NetLostCheck(void);
 
+// ---- A hidden browser tab (brief 04) ---------------------------------------------------------
+
+// Browser build only. A hidden tab has no animation frames and about one timer run a second, so a
+// network game in it is driven by network events instead (jfbuild/src/sdlayer2.c: handleevents()
+// waits for vnet's wake callback while the tab is hidden and a relay session exists) and draws
+// nothing. app_main's loop calls HiddenNetPass() instead of the drawing half of its pass; it does
+// what the drawing half would have done for the network. See its definition in netgame.c.
+#ifdef __EMSCRIPTEN__
+void HiddenNetPass(void);
+#endif
+
 // ---- The sync check's log ---------------------------------------------------------------------
 
 // checksync() calls these. A comparison of one sync byte of each player against the master's:
