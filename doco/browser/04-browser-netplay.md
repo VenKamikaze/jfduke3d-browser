@@ -106,20 +106,62 @@ Playwright cannot hide a tab: the tests imitate one as jfSW's do (`document.hidd
 
 Status: **review** (branch `browser/04-browser-netplay` in jfduke3d-browser; fix branch `fix/level-exit-stale-inputs` from `master`). **No fork change**: jfbuild stays at `5950d14`, jfaudiolib and jfmact are untouched, so jfSW's `make test` was not affected and was not run. Nothing was merged, no pull request was opened, `claude` and `master` were not touched. Not tested: a person playing, a tab that is really hidden (Playwright cannot hide one: the imitation is as jfSW's), Firefox and Safari, WebTransport against a real certificate, a registered GRP, Windows or macOS.
 
-@@SHAS@@
+**Commits.** Branch `browser/04-browser-netplay` (from `claude` `83ef1f2`); the code is final at `dfc468e` (later commits are docs only). Fix branch `fix/level-exit-stale-inputs` `f67d20a` (from `master` `55c5f95`; merged `--no-ff` as `3319090`). Main commits: `e19e4f7` hidden pass, `8c5243a` and `5e9aa48` the instruments, `test-nodraw.sh` and the hash change, `96d9d0a` `-testlate`, `694aa06` stall hook that keeps the clock running and the late game in `level-exit`, `dfc468e` the WebTransport page fix. No fork change (jfbuild `5950d14`).
 
 **What landed**
 
 - *Reused unchanged from jfSW (the jfbuild fork at `5950d14`):* the vnet-backed `mmulti.c` in the wasm build, the vnet wake callback and `jfbuild_browser_wake()`, the hidden yield in `showframe()` and `handleevents()` (a `MessageChannel` message, never `setTimeout`), `mmulti_vnet_flush()`, the test knobs (`?relay_wt=`, `?relay_cert=`, `?impair=`, test mode only). The browser already played network games after 02; 04 shows it.
 - *The hidden pass* (`src/netgame.c` `HiddenNetPass()`, 15 lines in `app_main`'s loop): in a hidden tab with a relay session the loop skips `cheats()`, `nonsharedkeys()`, `displayrooms()`, `displayrest()`, `checksync()` and `nextpage()` and runs `faketimerhandler()` for every input that is due (at most 8), `checksync()` (the sync ring has 256 entries), and `mmulti_vnet_flush()`. Design and what differs from jfSW: `code-facts.md` section 20.2.
 - *The audit and its instruments* (`src/testhooks.c`): `-testdrawcheck` (the raw bytes of every simulation table before and after `displayrooms()` and `displayrest()`), `-testnodraw` (the hidden pass without a browser), `-testcam<T>,<n>` and `-testmirror<T>,<n>` (every player in front of a security monitor, pressing use, or a mirror, firing the RPG). Verdicts: `code-facts.md` section 20.3.
-- *Tests:* `tests/web/netplay.js` (@@NSCEN@@ scenarios, `--list`), `tests/net/test-nodraw.sh` and two new scenarios of `tests/net/test-level-exit.sh` (both in `make test-net`), `make test-web` runs `netplay.js`.
+- *Tests:* `tests/web/netplay.js` (24 scenarios, `--list`), `tests/net/test-nodraw.sh` and two new scenarios of `tests/net/test-level-exit.sh` (both in `make test-net`), `make test-web` runs `netplay.js`.
 - *Page:* `?wake_every=N` (test only), and the harmless rejection when a WebTransport session is closed at the game's exit is not reported as a page error (jfSW's 06b; found by the `wt` scenario).
 - *Docs:* `code-facts.md` section 20, `bugs.md` D17, D18 (new) and D11 (reproduced, fixed), `building.md`, this Outcome, the README row. `PROMPT.md` is not edited.
 
-@@RESULTS@@
+**Results** (final code, rebuilt from clean; one scenario batch at a time under `flock`, load average 2 to 6 on 4 shared cores; all 24 scenarios, **709 checks passed, 0 failed**, in five batches).
 
-@@MUTATIONS@@
+| Scenario | Checks | What it shows |
+|---|---|---|
+| `ws`, `ws3` | 19, 27 | two and three browsers over WebSocket, 1200 tics, dumps identical (about 44 s a game) |
+| `browser-host`, `native-host` | 17, 17 | browser host with a native joiner and the reverse |
+| `mixed3` | 50 | three players, browser host with a native and a browser; and a native host with two browsers |
+| `impaired` | 48 | `lat=30,jit=10,loss=4,dup=2,reorder=3` on every machine, a seed each: browser + native, then three browsers |
+| `wt` | 44 | two browsers, then a native host with two browsers, over WebTransport (`-dev-cert`), every browser on `relay-wt`; the page ends with "The game has ended." |
+| `level-exit` | 114 | three games of browser host, native, browser: a slave stopped 1.5 s at tic 190, the master stopped with 200 ms late joiners, a slave's input of tic 201 sent 1.5 s late (D11); every machine plays exactly 200 tics, dumps (500 records) and states agree |
+| `hidden-slave` | 25 | hidden at tic 117: 30.0 tics/s on the visible host and 30.1 on the hidden tab (nominal 30, tic 250 to 1450); 1540 wake-ups, 32 passes a second, 0 pictures after the hide, 0 of 1419 hidden yields with data held back; the hidden tab compares 1498 of 1500 sync bytes |
+| `hidden-host` | 24 | hidden browser host, native slave: 30.0 and 30.0, 40 passes a second |
+| `hidden-thin` | 25 | every 6th wake-up only: 30.0 and 29.9, 5 passes a second |
+| `hidden-frozen` | 27 | hidden slave frozen 3 s: 30.8 and 30.5 afterwards, the visible machine moves 2 to 3 tics during the freeze, the room is 0.0 to 1.0 s late |
+| `hidden-local` | 6 | a hidden single player game still pauses: 7.8 tics/s against 30.6 visible, 0 hidden passes |
+| `hidden-level` | 57 | hidden slave across a level change: 0 pictures in either level (34 are the level change's own loading screen and fades) |
+| `draw-state` | 68 | hidden tab and drawing machines over a security camera and a mirror broken by rockets: dumps and states equal at tics 1, 2 and last; the hidden tab asked for 0 pictures, the visible browser 525 to 794 |
+| `frozen-slave`, `frozen-host` | 20, 19 | a tab frozen 5 s: the other machine moves 3 tics, then all play on to 1200 and agree |
+| `relay-lost` | 5 | the relay drops a frozen tab: it ends with status 1 and the relay message 3.3 to 3.5 s after thawing |
+| `nudge-slave`, `nudge-master` | 15, 15 | `-testnudge`: every machine logs `GAME OUT OF SYNC`, the dumps differ from tic 300 on |
+| `errors` | 34 | on the overlay, status 1: relay unreachable (4.0 s), plain `-net`, a UDP-style `-relay`, bad code, no such room, room full (0.2 s each), host gone (10.1 s) |
+| `gate` | 10 | the default config refuses a shareware network game on the overlay, no room made (relay `rooms_created` 0); a visitor's address cannot pass `-allowsharewarenet` |
+| `knobs` | 7 | knobs and `wake_every` only with `?test=1` |
+| `long` | 16 | 4000 tics of co-op E1L2, browser host and native slave: 30.0 tics/s |
+
+Regression (on `694aa06`, before the page-only and test-only commits after it): `make test GAME_RUNS=1` exit 0 (606 ok, 0 FAIL, no NOT RUN); `data.js` 193/0, `con` 17/0, `persist` 18/0, `menu-keys` 23/0, `loops` 18/0, `grptable` 12/0, `determinism` 22/0 (strict, native gcc and wasm identical); `frametime` 3 passed, 1 failed (the known 100 ms stall check: max 112 ms, median 16.7 ms). On the final code: `smoke.js` 36/0 and `focus.js` 24/0.
+
+**Mutations** (each applied, built, run, reverted, rebuilt; every new test fails without its feature)
+
+| Mutation | Test | What failed |
+|---|---|---|
+| wake handler emptied (fork file, not committed) | `hidden-slave` | 7.6 and 7.7 tics/s instead of 30, 0 of 186 yields resumed by a network event: 5 |
+| `faketimerhandler()` removed from the pass | `hidden-slave` | the room stops at about 110 tics: 7 |
+| flush removed | `hidden-slave` | 1386 of 1411 yields entered with data held back: 1 |
+| no hidden pass | `hidden-slave` | 748 pictures asked for while hidden: 2 |
+| `checksync()` removed from the pass | `hidden-slave` | 109 of 1500 sync bytes compared: 1 |
+| knob gate opened (`if (true)`) | `knobs` | knobs handed over without `?test=1`: 1 |
+| both shareware checks open | `gate` | the game starts a network game: 5 (only the early check open: still refused, 10 passed) |
+| drawing adds 1 to `ps.posx` | `draw-state`, `test-nodraw.sh camera` | dumps differ from tic 1: 20 and 11 |
+| monitor counter and owner back in the hash | `draw-state`, `test-nodraw.sh camera` | `sprite 613 owner: 534 against 54`, first difference tic 63: 6 and 7 |
+| D11 fix removed | `level-exit-late`, `relay-late`, `udp-late` | 5, 4, 4 |
+| D5 fix removed | `level-exit` | 4 |
+| D6 fix removed | `level-exit` | **0: the browser scenario does not reach D6**; A1's native `relay-slave` and `udp-slave` do |
+| `NetLostCheck` disabled | `relay-lost` | the frozen tab never ends: 3 |
+| `NETPLAY_FLIP=1` (one byte flipped) | `ws` | first difference at tic 601: 1 |
 
 **Decisions** (taken without the coordinator, the most conservative option each time)
 
@@ -164,7 +206,49 @@ Things only a person can check:
 
 ## State at hand-off (19 Nov 2026)
 
-Written when the coordinator asked to save progress. The Outcome above still has the placeholders `@@SHAS@@`, `@@NSCEN@@`, `@@RESULTS@@` and `@@MUTATIONS@@` (the decisions and the play-test steps are written): fill them from this section.
+Written when the coordinator asked to save progress. The Outcome above still has the placeholders `**Commits.** Branch `browser/04-browser-netplay` (from `claude` `83ef1f2`); the code is final at `dfc468e` (later commits are docs only). Fix branch `fix/level-exit-stale-inputs` `f67d20a` (from `master` `55c5f95`; merged `--no-ff` as `3319090`). Main commits: `e19e4f7` hidden pass, `8c5243a` and `5e9aa48` the instruments, `test-nodraw.sh` and the hash change, `96d9d0a` `-testlate`, `694aa06` stall hook that keeps the clock running and the late game in `level-exit`, `dfc468e` the WebTransport page fix. No fork change (jfbuild `5950d14`).`, `24`, `**Results** (final code, rebuilt from clean; one scenario batch at a time under `flock`, load average 2 to 6 on 4 shared cores; all 24 scenarios, **709 checks passed, 0 failed**, in five batches).
+
+| Scenario | Checks | What it shows |
+|---|---|---|
+| `ws`, `ws3` | 19, 27 | two and three browsers over WebSocket, 1200 tics, dumps identical (about 44 s a game) |
+| `browser-host`, `native-host` | 17, 17 | browser host with a native joiner and the reverse |
+| `mixed3` | 50 | three players, browser host with a native and a browser; and a native host with two browsers |
+| `impaired` | 48 | `lat=30,jit=10,loss=4,dup=2,reorder=3` on every machine, a seed each: browser + native, then three browsers |
+| `wt` | 44 | two browsers, then a native host with two browsers, over WebTransport (`-dev-cert`), every browser on `relay-wt`; the page ends with "The game has ended." |
+| `level-exit` | 114 | three games of browser host, native, browser: a slave stopped 1.5 s at tic 190, the master stopped with 200 ms late joiners, a slave's input of tic 201 sent 1.5 s late (D11); every machine plays exactly 200 tics, dumps (500 records) and states agree |
+| `hidden-slave` | 25 | hidden at tic 117: 30.0 tics/s on the visible host and 30.1 on the hidden tab (nominal 30, tic 250 to 1450); 1540 wake-ups, 32 passes a second, 0 pictures after the hide, 0 of 1419 hidden yields with data held back; the hidden tab compares 1498 of 1500 sync bytes |
+| `hidden-host` | 24 | hidden browser host, native slave: 30.0 and 30.0, 40 passes a second |
+| `hidden-thin` | 25 | every 6th wake-up only: 30.0 and 29.9, 5 passes a second |
+| `hidden-frozen` | 27 | hidden slave frozen 3 s: 30.8 and 30.5 afterwards, the visible machine moves 2 to 3 tics during the freeze, the room is 0.0 to 1.0 s late |
+| `hidden-local` | 6 | a hidden single player game still pauses: 7.8 tics/s against 30.6 visible, 0 hidden passes |
+| `hidden-level` | 57 | hidden slave across a level change: 0 pictures in either level (34 are the level change's own loading screen and fades) |
+| `draw-state` | 68 | hidden tab and drawing machines over a security camera and a mirror broken by rockets: dumps and states equal at tics 1, 2 and last; the hidden tab asked for 0 pictures, the visible browser 525 to 794 |
+| `frozen-slave`, `frozen-host` | 20, 19 | a tab frozen 5 s: the other machine moves 3 tics, then all play on to 1200 and agree |
+| `relay-lost` | 5 | the relay drops a frozen tab: it ends with status 1 and the relay message 3.3 to 3.5 s after thawing |
+| `nudge-slave`, `nudge-master` | 15, 15 | `-testnudge`: every machine logs `GAME OUT OF SYNC`, the dumps differ from tic 300 on |
+| `errors` | 34 | on the overlay, status 1: relay unreachable (4.0 s), plain `-net`, a UDP-style `-relay`, bad code, no such room, room full (0.2 s each), host gone (10.1 s) |
+| `gate` | 10 | the default config refuses a shareware network game on the overlay, no room made (relay `rooms_created` 0); a visitor's address cannot pass `-allowsharewarenet` |
+| `knobs` | 7 | knobs and `wake_every` only with `?test=1` |
+| `long` | 16 | 4000 tics of co-op E1L2, browser host and native slave: 30.0 tics/s |
+
+Regression (on `694aa06`, before the page-only and test-only commits after it): `make test GAME_RUNS=1` exit 0 (606 ok, 0 FAIL, no NOT RUN); `data.js` 193/0, `con` 17/0, `persist` 18/0, `menu-keys` 23/0, `loops` 18/0, `grptable` 12/0, `determinism` 22/0 (strict, native gcc and wasm identical); `frametime` 3 passed, 1 failed (the known 100 ms stall check: max 112 ms, median 16.7 ms). On the final code: `smoke.js` 36/0 and `focus.js` 24/0.` and `**Mutations** (each applied, built, run, reverted, rebuilt; every new test fails without its feature)
+
+| Mutation | Test | What failed |
+|---|---|---|
+| wake handler emptied (fork file, not committed) | `hidden-slave` | 7.6 and 7.7 tics/s instead of 30, 0 of 186 yields resumed by a network event: 5 |
+| `faketimerhandler()` removed from the pass | `hidden-slave` | the room stops at about 110 tics: 7 |
+| flush removed | `hidden-slave` | 1386 of 1411 yields entered with data held back: 1 |
+| no hidden pass | `hidden-slave` | 748 pictures asked for while hidden: 2 |
+| `checksync()` removed from the pass | `hidden-slave` | 109 of 1500 sync bytes compared: 1 |
+| knob gate opened (`if (true)`) | `knobs` | knobs handed over without `?test=1`: 1 |
+| both shareware checks open | `gate` | the game starts a network game: 5 (only the early check open: still refused, 10 passed) |
+| drawing adds 1 to `ps.posx` | `draw-state`, `test-nodraw.sh camera` | dumps differ from tic 1: 20 and 11 |
+| monitor counter and owner back in the hash | `draw-state`, `test-nodraw.sh camera` | `sprite 613 owner: 534 against 54`, first difference tic 63: 6 and 7 |
+| D11 fix removed | `level-exit-late`, `relay-late`, `udp-late` | 5, 4, 4 |
+| D5 fix removed | `level-exit` | 4 |
+| D6 fix removed | `level-exit` | **0: the browser scenario does not reach D6**; A1's native `relay-slave` and `udp-slave` do |
+| `NetLostCheck` disabled | `relay-lost` | the frozen tab never ends: 3 |
+| `NETPLAY_FLIP=1` (one byte flipped) | `ws` | first difference at tic 601: 1 |` (the decisions and the play-test steps are written): fill them from this section.
 
 **Commits.** Branch `browser/04-browser-netplay` (from `claude` `83ef1f2`), tip `dfc468e` plus the commit of this section; fix branch `fix/level-exit-stale-inputs` `f67d20a` (from `master` `55c5f95`, pushed, merged `--no-ff` as `3319090`; D11). No fork change (jfbuild `5950d14`). Main commits: `e19e4f7` hidden pass; `8c5243a` and `5e9aa48` instruments, `test-nodraw.sh`, hash change; `96d9d0a` `-testlate`; `694aa06` stall hook with the clock running in slices, late game in `level-exit`; `dfc468e` page fix for WebTransport games. Line endings checked: every file touched is LF (CR count 0).
 
@@ -172,7 +256,24 @@ Written when the coordinator asked to save progress. The Outcome above still has
 1. Browser netplay: **passed**. Full `netplay.js` run on tree `694aa06`: 660 passed, 2 failed (both then fixed and re-verified by themselves: `wt` 44/0 three times, `hidden-frozen` 27/0 twice). Per scenario checks: ws 17, ws3 24, browser-host 16, native-host 16, mixed3 46 (two games), impaired 44, wt 44, level-exit 108 (three games, 3 players), hidden-level 54, long 15 (4000 tics, 30.0 tics/s, browser host + native, E1L2). Every game 1200+ tics, status 0, dumps identical. Errors 34, relay-lost 5 (ends 3.5 s after thaw, overlay message), frozen-slave/host 18 each (room moves 3 to 5 tics in 5 s), gate 10, knobs 7, nudge 13 each.
 2. Hidden tab: **passed**. hidden-slave 30.0 and 30.1 tics/s (nominal 30; window tic 250 to 1450), 1540 wake-ups, 32 passes/s, 0 pictures after hide, 0 of 1419 yields with data held back; hidden-host 30.0/30.0, 40 passes/s; hidden-thin (every 6th wake) 30.0/29.9, 5 passes/s; hidden-frozen (3 s freeze) 30.8/30.5, visible machine moves 2 to 3 tics during the freeze, late 0.0 to 1.0 s; hidden-local (single player) 7.8 tics/s against 30.6 visible; hidden tab compares 1498 of 1500 sync bytes. Mutations below fail.
 3. Drawing audit: **passed** (`code-facts.md` 20.3). Only four lasting drawing writes in six levels x 900 tics and in camera and mirror games: `hittype.dispicnum`, `ps.visibility`, a player's `sprite.yoffset`, a monitor's `temp_data[0]` and `owner`. None read by the simulation. Monitor fields removed from the hash (justified). `draw-state` (hidden tab + visible machines, camera and mirror): dumps and states equal, 64 checks. `test-nodraw.sh` camera and mirror pass natively. No L19.
-4. Mutations: **done** (table below), except that `@@MUTATIONS@@` is not yet pasted in the Outcome.
+4. Mutations: **done** (table below), except that `**Mutations** (each applied, built, run, reverted, rebuilt; every new test fails without its feature)
+
+| Mutation | Test | What failed |
+|---|---|---|
+| wake handler emptied (fork file, not committed) | `hidden-slave` | 7.6 and 7.7 tics/s instead of 30, 0 of 186 yields resumed by a network event: 5 |
+| `faketimerhandler()` removed from the pass | `hidden-slave` | the room stops at about 110 tics: 7 |
+| flush removed | `hidden-slave` | 1386 of 1411 yields entered with data held back: 1 |
+| no hidden pass | `hidden-slave` | 748 pictures asked for while hidden: 2 |
+| `checksync()` removed from the pass | `hidden-slave` | 109 of 1500 sync bytes compared: 1 |
+| knob gate opened (`if (true)`) | `knobs` | knobs handed over without `?test=1`: 1 |
+| both shareware checks open | `gate` | the game starts a network game: 5 (only the early check open: still refused, 10 passed) |
+| drawing adds 1 to `ps.posx` | `draw-state`, `test-nodraw.sh camera` | dumps differ from tic 1: 20 and 11 |
+| monitor counter and owner back in the hash | `draw-state`, `test-nodraw.sh camera` | `sprite 613 owner: 534 against 54`, first difference tic 63: 6 and 7 |
+| D11 fix removed | `level-exit-late`, `relay-late`, `udp-late` | 5, 4, 4 |
+| D5 fix removed | `level-exit` | 4 |
+| D6 fix removed | `level-exit` | **0: the browser scenario does not reach D6**; A1's native `relay-slave` and `udp-slave` do |
+| `NetLostCheck` disabled | `relay-lost` | the frozen tab never ends: 3 |
+| `NETPLAY_FLIP=1` (one byte flipped) | `ws` | first difference at tic 601: 1 |` is not yet pasted in the Outcome.
 5. No regressions: **passed on the tree before the last two commits**: `make test GAME_RUNS=1` exit 0 (606 ok, 0 FAIL, no NOT RUN); `smoke` 36/0, `data` 193/0, `con` 17/0, `persist` 18/0, `focus` 24/0, `menu-keys` 23/0, `loops` 18/0, `grptable` 12/0, `determinism` 22/0 (strict), `frametime` 3/1 (known 100 ms stall check: max 112 ms, median 16.7 ms). Not re-run after `dfc468e` (page-only change to the WebTransport rejection handler, and test edits). A final full `netplay.js` run plus `smoke.js` and `focus.js` was started and **stopped** unfinished.
 6. Docs: code-facts 20 (20.1 to 20.6), bugs D17, D18, D11 (fixed), building, README row: **done**. Outcome: **partly** (placeholders above). PROMPT.md not touched.
 
@@ -181,7 +282,49 @@ Written when the coordinator asked to save progress. The Outcome above still has
 **Remaining work, in order.**
 1. `cd /home/user/wt-d04 || git worktree add /home/user/wt-d04 browser/04-browser-netplay` (submodules: `git submodule update --init --recursive`; `scripts/fetch-test-data.sh`; `make -j4`; `EMSDK_DIR=~/.cache/jfsw-browser/emsdk scripts/build-wasm.sh`).
 2. `flock /tmp/jfd-heavy-tests.lock env --default-signal=INT node tests/web/netplay.js > /tmp/np.log 2>&1` (about 55 min; expect 0 failed); then `node tests/web/smoke.js` and `focus.js`. Per-scenario counts: `python3 /home/user/d04-logs/../d04scratch/counts.py` is lost if /tmp is cleared (trivial: count `  ok` lines between `== name:` headers).
-3. Fill `@@SHAS@@` (branch tips, fix SHA), `@@NSCEN@@` (24 scenarios: `node tests/web/netplay.js --list`), `@@RESULTS@@` and `@@MUTATIONS@@` from this section; delete this section's "placeholders" sentence; commit with the browser trailers; push.
+3. Fill `**Commits.** Branch `browser/04-browser-netplay` (from `claude` `83ef1f2`); the code is final at `dfc468e` (later commits are docs only). Fix branch `fix/level-exit-stale-inputs` `f67d20a` (from `master` `55c5f95`; merged `--no-ff` as `3319090`). Main commits: `e19e4f7` hidden pass, `8c5243a` and `5e9aa48` the instruments, `test-nodraw.sh` and the hash change, `96d9d0a` `-testlate`, `694aa06` stall hook that keeps the clock running and the late game in `level-exit`, `dfc468e` the WebTransport page fix. No fork change (jfbuild `5950d14`).` (branch tips, fix SHA), `24` (24 scenarios: `node tests/web/netplay.js --list`), `**Results** (final code, rebuilt from clean; one scenario batch at a time under `flock`, load average 2 to 6 on 4 shared cores; all 24 scenarios, **709 checks passed, 0 failed**, in five batches).
+
+| Scenario | Checks | What it shows |
+|---|---|---|
+| `ws`, `ws3` | 19, 27 | two and three browsers over WebSocket, 1200 tics, dumps identical (about 44 s a game) |
+| `browser-host`, `native-host` | 17, 17 | browser host with a native joiner and the reverse |
+| `mixed3` | 50 | three players, browser host with a native and a browser; and a native host with two browsers |
+| `impaired` | 48 | `lat=30,jit=10,loss=4,dup=2,reorder=3` on every machine, a seed each: browser + native, then three browsers |
+| `wt` | 44 | two browsers, then a native host with two browsers, over WebTransport (`-dev-cert`), every browser on `relay-wt`; the page ends with "The game has ended." |
+| `level-exit` | 114 | three games of browser host, native, browser: a slave stopped 1.5 s at tic 190, the master stopped with 200 ms late joiners, a slave's input of tic 201 sent 1.5 s late (D11); every machine plays exactly 200 tics, dumps (500 records) and states agree |
+| `hidden-slave` | 25 | hidden at tic 117: 30.0 tics/s on the visible host and 30.1 on the hidden tab (nominal 30, tic 250 to 1450); 1540 wake-ups, 32 passes a second, 0 pictures after the hide, 0 of 1419 hidden yields with data held back; the hidden tab compares 1498 of 1500 sync bytes |
+| `hidden-host` | 24 | hidden browser host, native slave: 30.0 and 30.0, 40 passes a second |
+| `hidden-thin` | 25 | every 6th wake-up only: 30.0 and 29.9, 5 passes a second |
+| `hidden-frozen` | 27 | hidden slave frozen 3 s: 30.8 and 30.5 afterwards, the visible machine moves 2 to 3 tics during the freeze, the room is 0.0 to 1.0 s late |
+| `hidden-local` | 6 | a hidden single player game still pauses: 7.8 tics/s against 30.6 visible, 0 hidden passes |
+| `hidden-level` | 57 | hidden slave across a level change: 0 pictures in either level (34 are the level change's own loading screen and fades) |
+| `draw-state` | 68 | hidden tab and drawing machines over a security camera and a mirror broken by rockets: dumps and states equal at tics 1, 2 and last; the hidden tab asked for 0 pictures, the visible browser 525 to 794 |
+| `frozen-slave`, `frozen-host` | 20, 19 | a tab frozen 5 s: the other machine moves 3 tics, then all play on to 1200 and agree |
+| `relay-lost` | 5 | the relay drops a frozen tab: it ends with status 1 and the relay message 3.3 to 3.5 s after thawing |
+| `nudge-slave`, `nudge-master` | 15, 15 | `-testnudge`: every machine logs `GAME OUT OF SYNC`, the dumps differ from tic 300 on |
+| `errors` | 34 | on the overlay, status 1: relay unreachable (4.0 s), plain `-net`, a UDP-style `-relay`, bad code, no such room, room full (0.2 s each), host gone (10.1 s) |
+| `gate` | 10 | the default config refuses a shareware network game on the overlay, no room made (relay `rooms_created` 0); a visitor's address cannot pass `-allowsharewarenet` |
+| `knobs` | 7 | knobs and `wake_every` only with `?test=1` |
+| `long` | 16 | 4000 tics of co-op E1L2, browser host and native slave: 30.0 tics/s |
+
+Regression (on `694aa06`, before the page-only and test-only commits after it): `make test GAME_RUNS=1` exit 0 (606 ok, 0 FAIL, no NOT RUN); `data.js` 193/0, `con` 17/0, `persist` 18/0, `menu-keys` 23/0, `loops` 18/0, `grptable` 12/0, `determinism` 22/0 (strict, native gcc and wasm identical); `frametime` 3 passed, 1 failed (the known 100 ms stall check: max 112 ms, median 16.7 ms). On the final code: `smoke.js` 36/0 and `focus.js` 24/0.` and `**Mutations** (each applied, built, run, reverted, rebuilt; every new test fails without its feature)
+
+| Mutation | Test | What failed |
+|---|---|---|
+| wake handler emptied (fork file, not committed) | `hidden-slave` | 7.6 and 7.7 tics/s instead of 30, 0 of 186 yields resumed by a network event: 5 |
+| `faketimerhandler()` removed from the pass | `hidden-slave` | the room stops at about 110 tics: 7 |
+| flush removed | `hidden-slave` | 1386 of 1411 yields entered with data held back: 1 |
+| no hidden pass | `hidden-slave` | 748 pictures asked for while hidden: 2 |
+| `checksync()` removed from the pass | `hidden-slave` | 109 of 1500 sync bytes compared: 1 |
+| knob gate opened (`if (true)`) | `knobs` | knobs handed over without `?test=1`: 1 |
+| both shareware checks open | `gate` | the game starts a network game: 5 (only the early check open: still refused, 10 passed) |
+| drawing adds 1 to `ps.posx` | `draw-state`, `test-nodraw.sh camera` | dumps differ from tic 1: 20 and 11 |
+| monitor counter and owner back in the hash | `draw-state`, `test-nodraw.sh camera` | `sprite 613 owner: 534 against 54`, first difference tic 63: 6 and 7 |
+| D11 fix removed | `level-exit-late`, `relay-late`, `udp-late` | 5, 4, 4 |
+| D5 fix removed | `level-exit` | 4 |
+| D6 fix removed | `level-exit` | **0: the browser scenario does not reach D6**; A1's native `relay-slave` and `udp-slave` do |
+| `NetLostCheck` disabled | `relay-lost` | the frozen tab never ends: 3 |
+| `NETPLAY_FLIP=1` (one byte flipped) | `ws` | first difference at tic 601: 1 |` from this section; delete this section's "placeholders" sentence; commit with the browser trailers; push.
 4. Optional: `make test-net` once more on the final tree; `git worktree remove /home/user/wt-d04-fix1` (if still there).
 
 **Known problems and open questions.** The browser `level-exit` scenario does not reach D6 (covered natively by A1). jfSW's page has the same handler order that made a WebTransport game end with "Something went wrong: The session is closed." (rejection before `onExit`); Duke's page now checks WebTransport errors first; jfSW is worth the same fix (not done). D11 in peer-to-peer mode (getpackets case 17) has the same hazard and is untested. D17 (floor over floor, no maps to test) and D18 are recorded only. Do not run `git add -A` while a mutation is applied: a mutated `netgame.c` was committed once by mistake and restored in `ef2f1b0`.
@@ -194,5 +337,50 @@ Written when the coordinator asked to save progress. The Outcome above still has
 
 Worktree `/home/user/wt-d04` recreated from origin (kept; data, native and wasm rebuilt, no source change since `143077c`). Full `netplay.js` re-run in chunks on the final code (logs in `/home/user/d04-logs/c1..c3.log`): ws, ws3, browser-host, native-host, mixed3, impaired **178 passed, 0 failed**; wt, hidden-slave, hidden-host, hidden-thin, hidden-frozen, hidden-local **151/0**; level-exit, hidden-level, draw-state **239/0**. A fourth chunk (frozen-slave, frozen-host, relay-lost, nudge-slave, nudge-master) was stopped unfinished.
 
-**Still to do:** run `errors gate knobs long` and the stopped chunk (`/tmp/np-chunk.sh LOG scenario...` runs scenarios under flock; recreate it from the `flock ... node tests/web/netplay.js` command in the checklist), then `node tests/web/smoke.js` and `focus.js`; re-run `make test GAME_RUNS=1` and the other `tests/web` tests only if wanted (they passed on `694aa06`; later commits changed only the page's WebTransport handler and tests); fill the Outcome placeholders `@@SHAS@@`, `@@NSCEN@@` (24), `@@RESULTS@@`, `@@MUTATIONS@@` from the section above.
+**Still to do:** run `errors gate knobs long` and the stopped chunk (`/tmp/np-chunk.sh LOG scenario...` runs scenarios under flock; recreate it from the `flock ... node tests/web/netplay.js` command in the checklist), then `node tests/web/smoke.js` and `focus.js`; re-run `make test GAME_RUNS=1` and the other `tests/web` tests only if wanted (they passed on `694aa06`; later commits changed only the page's WebTransport handler and tests); fill the Outcome placeholders `**Commits.** Branch `browser/04-browser-netplay` (from `claude` `83ef1f2`); the code is final at `dfc468e` (later commits are docs only). Fix branch `fix/level-exit-stale-inputs` `f67d20a` (from `master` `55c5f95`; merged `--no-ff` as `3319090`). Main commits: `e19e4f7` hidden pass, `8c5243a` and `5e9aa48` the instruments, `test-nodraw.sh` and the hash change, `96d9d0a` `-testlate`, `694aa06` stall hook that keeps the clock running and the late game in `level-exit`, `dfc468e` the WebTransport page fix. No fork change (jfbuild `5950d14`).`, `24` (24), `**Results** (final code, rebuilt from clean; one scenario batch at a time under `flock`, load average 2 to 6 on 4 shared cores; all 24 scenarios, **709 checks passed, 0 failed**, in five batches).
 
+| Scenario | Checks | What it shows |
+|---|---|---|
+| `ws`, `ws3` | 19, 27 | two and three browsers over WebSocket, 1200 tics, dumps identical (about 44 s a game) |
+| `browser-host`, `native-host` | 17, 17 | browser host with a native joiner and the reverse |
+| `mixed3` | 50 | three players, browser host with a native and a browser; and a native host with two browsers |
+| `impaired` | 48 | `lat=30,jit=10,loss=4,dup=2,reorder=3` on every machine, a seed each: browser + native, then three browsers |
+| `wt` | 44 | two browsers, then a native host with two browsers, over WebTransport (`-dev-cert`), every browser on `relay-wt`; the page ends with "The game has ended." |
+| `level-exit` | 114 | three games of browser host, native, browser: a slave stopped 1.5 s at tic 190, the master stopped with 200 ms late joiners, a slave's input of tic 201 sent 1.5 s late (D11); every machine plays exactly 200 tics, dumps (500 records) and states agree |
+| `hidden-slave` | 25 | hidden at tic 117: 30.0 tics/s on the visible host and 30.1 on the hidden tab (nominal 30, tic 250 to 1450); 1540 wake-ups, 32 passes a second, 0 pictures after the hide, 0 of 1419 hidden yields with data held back; the hidden tab compares 1498 of 1500 sync bytes |
+| `hidden-host` | 24 | hidden browser host, native slave: 30.0 and 30.0, 40 passes a second |
+| `hidden-thin` | 25 | every 6th wake-up only: 30.0 and 29.9, 5 passes a second |
+| `hidden-frozen` | 27 | hidden slave frozen 3 s: 30.8 and 30.5 afterwards, the visible machine moves 2 to 3 tics during the freeze, the room is 0.0 to 1.0 s late |
+| `hidden-local` | 6 | a hidden single player game still pauses: 7.8 tics/s against 30.6 visible, 0 hidden passes |
+| `hidden-level` | 57 | hidden slave across a level change: 0 pictures in either level (34 are the level change's own loading screen and fades) |
+| `draw-state` | 68 | hidden tab and drawing machines over a security camera and a mirror broken by rockets: dumps and states equal at tics 1, 2 and last; the hidden tab asked for 0 pictures, the visible browser 525 to 794 |
+| `frozen-slave`, `frozen-host` | 20, 19 | a tab frozen 5 s: the other machine moves 3 tics, then all play on to 1200 and agree |
+| `relay-lost` | 5 | the relay drops a frozen tab: it ends with status 1 and the relay message 3.3 to 3.5 s after thawing |
+| `nudge-slave`, `nudge-master` | 15, 15 | `-testnudge`: every machine logs `GAME OUT OF SYNC`, the dumps differ from tic 300 on |
+| `errors` | 34 | on the overlay, status 1: relay unreachable (4.0 s), plain `-net`, a UDP-style `-relay`, bad code, no such room, room full (0.2 s each), host gone (10.1 s) |
+| `gate` | 10 | the default config refuses a shareware network game on the overlay, no room made (relay `rooms_created` 0); a visitor's address cannot pass `-allowsharewarenet` |
+| `knobs` | 7 | knobs and `wake_every` only with `?test=1` |
+| `long` | 16 | 4000 tics of co-op E1L2, browser host and native slave: 30.0 tics/s |
+
+Regression (on `694aa06`, before the page-only and test-only commits after it): `make test GAME_RUNS=1` exit 0 (606 ok, 0 FAIL, no NOT RUN); `data.js` 193/0, `con` 17/0, `persist` 18/0, `menu-keys` 23/0, `loops` 18/0, `grptable` 12/0, `determinism` 22/0 (strict, native gcc and wasm identical); `frametime` 3 passed, 1 failed (the known 100 ms stall check: max 112 ms, median 16.7 ms). On the final code: `smoke.js` 36/0 and `focus.js` 24/0.`, `**Mutations** (each applied, built, run, reverted, rebuilt; every new test fails without its feature)
+
+| Mutation | Test | What failed |
+|---|---|---|
+| wake handler emptied (fork file, not committed) | `hidden-slave` | 7.6 and 7.7 tics/s instead of 30, 0 of 186 yields resumed by a network event: 5 |
+| `faketimerhandler()` removed from the pass | `hidden-slave` | the room stops at about 110 tics: 7 |
+| flush removed | `hidden-slave` | 1386 of 1411 yields entered with data held back: 1 |
+| no hidden pass | `hidden-slave` | 748 pictures asked for while hidden: 2 |
+| `checksync()` removed from the pass | `hidden-slave` | 109 of 1500 sync bytes compared: 1 |
+| knob gate opened (`if (true)`) | `knobs` | knobs handed over without `?test=1`: 1 |
+| both shareware checks open | `gate` | the game starts a network game: 5 (only the early check open: still refused, 10 passed) |
+| drawing adds 1 to `ps.posx` | `draw-state`, `test-nodraw.sh camera` | dumps differ from tic 1: 20 and 11 |
+| monitor counter and owner back in the hash | `draw-state`, `test-nodraw.sh camera` | `sprite 613 owner: 534 against 54`, first difference tic 63: 6 and 7 |
+| D11 fix removed | `level-exit-late`, `relay-late`, `udp-late` | 5, 4, 4 |
+| D5 fix removed | `level-exit` | 4 |
+| D6 fix removed | `level-exit` | **0: the browser scenario does not reach D6**; A1's native `relay-slave` and `udp-slave` do |
+| `NetLostCheck` disabled | `relay-lost` | the frozen tab never ends: 3 |
+| `NETPLAY_FLIP=1` (one byte flipped) | `ws` | first difference at tic 601: 1 |` from the section above.
+
+### Final update (19 Nov 2026): checklist complete
+
+On the final code (`dfc468e`, docs only since): the stopped batch, `errors gate knobs long`, `smoke.js` (36/0) and `focus.js` (24/0) all passed (batches of 74/0 and 67/0; whole netplay run 709 passed, 0 failed). The Outcome has no placeholders. Not re-run after `694aa06`: `make test` and the other `tests/web` tests (only the page's WebTransport handler and test files changed since). Nothing remains except review.
