@@ -468,7 +468,18 @@ static void TestWait(int ms)
 #endif
 
 #ifdef __EMSCRIPTEN__
-    emscripten_sleep(ms);
+    // sampletimer() counts at most a quarter of a second of clock at a time in the browser (a hidden or throttled tab is taken
+    // for paused: jfbuild/src/sdlayer2.c), so a stall is slept in slices of 200 ms with the clock sampled after each: the
+    // clock runs as it does natively, and faketimerhandler() then makes the inputs that fell due in a burst
+    {
+        int left = ms, d;
+        while (left > 0) {
+            d = left > 200 ? 200 : left;
+            emscripten_sleep(d);
+            sampletimer();
+            left -= d;
+        }
+    }
 #else
     t0 = getticks();
     while ((int)(getticks() - t0) < ms)
