@@ -6,7 +6,7 @@
 //   node tests/web/determinism.js         needs ./duke3d (make), build-wasm/, testdata/duke3dshare.grp, cc with the SDL2 headers, and
 //                                          clang and rsync (tests/tools/build-native-clang.sh); without them it prints NOT RUN and exits 3
 //   DET_SEED=2 node tests/web/determinism.js     another scripted player (the default is 1)
-//   DET_TICS=2000 DET_WARP=1 DET_STRICT=0 DET_REVERSE=1 DET_KEEP=0 ...      (the defaults; see the code)
+//   DET_TICS=2000 DET_WARP=1 DET_ARM=1 DET_REVERSE=1 DET_KEEP=0 ...      (the defaults; see the code)
 //
 // The shareware GRP has no demo, so the input is made at test time. A demo records only the players' inputs, so a native recording
 // of a scripted player is all the wasm game needs:
@@ -25,22 +25,21 @@
 //
 // What is compared, and why there are two natives:
 //   gcc-native A against gcc-native B   the native game is deterministic (the same demo gives the same dump);
-//   clang-native C against wasm W        the main check: the browser's game equals the desktop game tic for tic. C is the native game
-//                                        built with clang, because bugs.md D15 (below) makes gcc and clang differ; with C the
-//                                        compiler's evaluation order is the same as Emscripten's (clang) and everything else shows;
-//   gcc-native A against W               what a player on a Linux desktop build would meet in a game with a browser. It FAILS today:
-//                                        D15, the order in which the compiler evaluates the arguments of RANDOMSCRAP (src/duke3d.h:
-//                                        EGS(..., TRAND&255, ..., TRAND&2047, ...)): the C standard leaves it open, gcc goes right to
-//                                        left and clang left to right, so debris gets different speeds and angles. This check is marked
-//                                        "known failure" (it does not fail the run) while D15 is open, and only while the first difference
-//                                        is where A and C also differ (same tic, same parts); anywhere else it is a failure, and when it
-//                                        stops failing (D15 fixed: remove the expectation, KNOWN below) that is a failure too. DET_STRICT=1
-//                                        makes it an ordinary failure. **After D15's first difference (tic 210 in E1L1) this comparison
-//                                        carries no information about the rest of the demo: the strict check is clang-native against wasm.**
+//   gcc-native A against wasm W          what a player on a Linux desktop build meets in a game with a browser, and the check
+//                                        that bugs.md D15 is fixed: the C standard leaves the order in which a call's arguments are
+//                                        evaluated open, gcc goes right to left and clang (Emscripten's compiler) left to right, and the
+//                                        game had calls with several random numbers as arguments (RANDOMSCRAP, EGS(...) of debris, glass
+//                                        and guts). The fix (F-D15) draws them into locals in gcc's order, so every compiler agrees: this
+//                                        is a plain must-equal check;
+//   clang-native C against wasm W        the browser's game equals a desktop game built with the same compiler, tic for tic. It tells a
+//                                        difference of compilers from any other difference between the native game and the browser's
+//                                        (the first one printed when A and W differ, and what D15 looked like before it was fixed);
 //   W with -testnudge                    the comparison fails when the wasm game differs: one player nudged at one tic is found at that tic.
 //   a demo recorded in the browser       the other direction: the page types a player's keys, the wasm game records a demo, and native
-//                                        (clang) and wasm play it back with the same dumps, and gcc-native against wasm is treated as above
-//                                        (DET_REVERSE=0 skips this part).
+//                                        (gcc and clang) and wasm play it back with the same dumps (DET_REVERSE=0 skips this part).
+// The scripted player and the playbacks use -testarm (src/testhooks.c: every weapon, full ammunition and health in every tic), so that
+// the recorded demo goes on for the whole time and shoots with every weapon: shotgun, chaingun, RPG. That is what reaches most of the
+// places F-D15 changed (debris of broken things, glass, guts of killed monsters). DET_ARM=0 plays with the starting pistol only.
 'use strict';
 const fs = require('fs');
 const os = require('os');
@@ -52,11 +51,9 @@ const PORT = t.port(48102);
 const SEED = +(process.env.DET_SEED || 1);
 const TICS = +(process.env.DET_TICS || 2000);           // game tics of the recorded demo (30 a second)
 const WARP = +(process.env.DET_WARP || 1);              // the browser's clock runs this many times faster (CI shortcut)
-const STRICT = process.env.DET_STRICT === '1';          // a known failure counts as a failure
+const ARM = process.env.DET_ARM !== '0';               // -testarm: every weapon, full ammunition and health
 const REVERSE = process.env.DET_REVERSE !== '0';
 const KEEP = process.env.DET_KEEP === '1';              // keep the work directory (and print it)
-// Known failures: D15 is the one open difference between the native (gcc) game and the browser's.
-const KNOWN = { D15: true };
 const DUKE = path.join(t.root, 'duke3d');
 const TOOLS = path.join(t.root, 'tests', 'tools');
 const HEADLESS = path.join(t.root, 'scripts', 'run-headless.sh');
@@ -82,16 +79,7 @@ function firstDiff(a, b) {
   }
   return ra.length === rb.length ? null : { record: n + 1, tic: n + 1, parts: ['length: ' + ra.length + ' against ' + rb.length + ' records'] };
 }
-const sameSpot = (a, b) => !!(a && b && a.tic === b.tic && a.parts.join() === b.parts.join());
 const describe = (d) => (d ? `tic ${d.tic} (${d.parts.join(', ')})` : 'none');
-
-// "known failure": see the header. Returns true when the run may go on as if it passed.
-function xfail(id, identical, what, detail) {
-  if (STRICT || !KNOWN[id]) { return t.check(identical, what, detail); }
-  if (identical) { return t.check(false, `${what}: it was expected to fail (known failure ${id}, bugs.md) and it passed: ${id} seems fixed, so remove it from KNOWN`); }
-  console.log(`  xfail ${what}: known failure ${id} (bugs.md): ${detail || ''}`);
-  return true;
-}
 
 // Runs a command; resolves { status, out }.
 function run(cmd, args, opts) {
@@ -110,7 +98,7 @@ function nativePlay(label, game, demo, extra) {
   const dir = fs.mkdtempSync(path.join(tmp, label + '-'));
   fs.writeFileSync(path.join(dir, 'demo1.dmo'), demo);
   const quit = Math.max(1, demo.tics - 10);
-  const args = ['--workdir', dir, '--timeout', String(Math.ceil(quit / 30) + 150), '--game', game, '--', '-ddemo1', '-testdump' + 'play.dump', '-testquit' + quit].concat(extra || []);
+  const args = ['--workdir', dir, '--timeout', String(Math.ceil(quit / 30) + 150), '--game', game, '--', '-ddemo1', '-testdump' + 'play.dump', '-testquit' + quit].concat(ARM ? ['-testarm'] : [], extra || []);
   return run(HEADLESS, args).then((r) => {
     const f = (n) => (fs.existsSync(path.join(dir, n)) ? fs.readFileSync(path.join(dir, n)) : null);
     return { dump: f('play.dump'), state: f('play.dump.state'), out: r.out, status: r.status, quit };
@@ -123,8 +111,13 @@ function parseState(buf) {
   let cur = null;
   for (const line of buf.toString('latin1').split('\n')) {
     const m = /^t(\d+) randomseed=/.exec(line);
-    if (m) { cur = snaps[+m[1]] = { player: null, actors: 0, sprites: 0 }; continue; }
+    if (m) { cur = snaps[+m[1]] = { player: null, actors: 0, sprites: 0, actorList: {} }; continue; }
     if (!cur) { continue; }
+    if (line.startsWith('sprite ')) {
+      const f = Object.fromEntries(line.split(' ').slice(2).map((x) => { const k = x.indexOf('='); return [x.slice(0, k), +x.slice(k + 1)]; }));
+      const idx = +line.split(' ')[1];
+      if (f.statnum === 1) { cur.actorList[idx] = { extra: f.extra, picnum: f.picnum }; }
+    }
     if (line.startsWith('player 0 ')) { cur.player = Object.fromEntries(line.split(' ').slice(2).map((x) => { const i = x.indexOf('='); return [x.slice(0, i), +x.slice(i + 1)]; })); }
     else if (line.startsWith('sprite ')) { cur.sprites++; if (/ statnum=1 /.test(line + ' ')) { cur.actors++; } }
   }
@@ -144,10 +137,21 @@ function activity(playback, dump) {
     hurt = Math.max(hurt, first.player.last_extra - p.last_extra);
     minActors = Math.min(minActors, snaps[k].actors);
   }
+  // Actors (statnum 1: monsters, but also barrels and the like) that took damage by a later snapshot: their health (`extra`) is lower than
+  // at the first one, they changed picture (a death or pain frame) or they are gone. -testarm refills the player's health in every tic, so
+  // the player's own health says nothing; what the monsters took does.
+  const hitActors = new Set();
+  for (const k of tics.slice(1)) {
+    for (const [i, a] of Object.entries(first.actorList)) {
+      const b = snaps[k].actorList[i];
+      if (!b || b.extra < a.extra || b.picnum !== a.picnum) { hitActors.add(i); }
+    }
+  }
+  const damaged = hitActors.size;
   const rs = records(dump);
   return {
     snapshots: tics, moved, ammoSpent: Math.max(0, ammo(first.player) - minAmmo), hurt,
-    killed: Math.max(0, first.actors - minActors), actorsAtStart: first.actors,
+    killed: Math.max(0, first.actors - minActors), actorsAtStart: first.actors, damaged,
     sectorStates: new Set(rs.map((r) => r[5])).size, tics: rs.length,
   };
 }
@@ -170,7 +174,7 @@ async function main() {
   // --- 1. a native recording of a scripted player --------------------------------------------------------------------
   const recdir = fs.mkdtempSync(path.join(tmp, 'rec-'));
   const rec = await run(HEADLESS,
-    ['--workdir', recdir, '--timeout', String(Math.ceil(TICS / 30) + 120), '--game', DUKE, '--', '-v1', '-l1', '-s2', '-r', '-testdump' + 'rec.dump', '-testquit' + TICS],
+    ['--workdir', recdir, '--timeout', String(Math.ceil(TICS / 30) + 120), '--game', DUKE, '--', '-v1', '-l1', '-s2', '-r', '-testdump' + 'rec.dump', '-testquit' + TICS].concat(ARM ? ['-testarm'] : []),
     { env: Object.assign({}, process.env, { LD_PRELOAD: shim, SYNTH_SECONDS: String(Math.ceil(TICS / 30) + 60), SYNTH_SEED: String(SEED), SYNTH_FIRE: '25', SYNTH_FORWARD: '85' }) });
   t.check(rec.status === 0, 'native: the scripted player recorded a demo and the game quit by itself (exit 0)', `status ${rec.status}: ${rec.out.slice(-300)}`);
   const demoFile = path.join(recdir, 'demo1.dmo');
@@ -191,7 +195,7 @@ async function main() {
     console.log(`playing the demo (${quit} tics) natively twice, with clang, and in the browser...`);
     const [A, B] = await Promise.all([nativePlay('gcc-a', DUKE, demo, stateArgs), nativePlay('gcc-b', DUKE, demo)]);
     const pC = nativePlay('clang', clang, demo);
-    const pW = t.runGame(env, { args: ['-ddemo1', '-testdump' + 'play.dump', '-testquit' + quit], files: [{ name: 'demo1.dmo' }], read: ['play.dump'], warp: WARP, timeoutMs: 600000 });
+    const pW = t.runGame(env, { args: ['-ddemo1', '-testdump' + 'play.dump', '-testquit' + quit].concat(ARM ? ['-testarm'] : []), files: [{ name: 'demo1.dmo' }], read: ['play.dump'], warp: WARP, timeoutMs: 600000 });
     const [C, W] = await Promise.all([pC, pW]);
     for (const [name, r] of [['native A', A], ['native B', B], ['clang native', C]]) {
       if (r) { t.check(r.status === 0 && r.dump && r.dump.length / 32 === quit, `${name}: played the demo and quit at tic ${quit} (${r.dump ? r.dump.length / 32 : 0} records, exit ${r.status})`); }
@@ -211,11 +215,11 @@ async function main() {
 
     // --- 3. the scripted player did something -------------------------------------------------------------------------
     const act = activity(A, A.dump);
-    console.log(`  activity over ${act.tics} tics (state at tics ${act.snapshots.join(', ')}): moved ${act.moved} units, spent ${act.ammoSpent} rounds, health lost ${act.hurt}, ${act.killed} of ${act.actorsAtStart} monsters gone, ${act.sectorStates} different sector states`);
+    console.log(`  activity over ${act.tics} tics (state at tics ${act.snapshots.join(', ')}): moved ${act.moved} units, spent ${act.ammoSpent} rounds, health lost ${act.hurt}, ${act.damaged} of ${act.actorsAtStart} actors hit or changed, ${act.killed} gone, ${act.sectorStates} different sector states`);
     t.check(act.tics >= 1500, `the dumps cover ${act.tics} game tics`);
     t.check(act.moved >= 1000, 'the scripted player walked around', String(act.moved));
     t.check(act.ammoSpent >= 3, 'the scripted player fired', String(act.ammoSpent));
-    t.check(act.hurt >= 1 || act.killed >= 1, 'monsters took part: the player was hurt or something was killed', `hurt ${act.hurt}, killed ${act.killed}`);
+    t.check(act.damaged >= 1 || act.hurt >= 1, 'monsters took part: an actor took damage or died (the player was hurt)', `damaged actors ${act.damaged}, killed ${act.killed}, player hurt ${act.hurt}`);
     t.check(act.sectorStates >= 10, 'sectors moved (doors, lifts, lights)', String(act.sectorStates));
 
     // --- 4. the comparisons --------------------------------------------------------------------------------------------
@@ -226,15 +230,14 @@ async function main() {
     t.check(dCW === null, `WASM AGAINST CLANG-NATIVE: the same ${quit} game tics, record for record (first difference: ${describe(dCW)})`);
     const dAC = C.dump ? firstDiff(A.dump, C.dump) : null;
     console.log(`  first difference, gcc native against clang native: ${describe(dAC)}; gcc native against wasm: ${describe(dAW)}`);
-    xfail('D15', dAW === null, 'gcc native against wasm, record for record', dAW ? `first difference at ${describe(dAW)}` : '');
-    if (dAW && !STRICT && KNOWN.D15) { t.check(sameSpot(dAW, dAC), 'gcc native against wasm differ only where gcc native and clang native differ (same first tic and parts: the compiler\'s evaluation order, D15)', `${describe(dAW)} against ${describe(dAC)}`); }
+    t.check(dAW === null, `GCC NATIVE AGAINST WASM: the same ${quit} game tics, record for record (D15: the order in which the compilers evaluate a call's arguments; first difference: ${describe(dAW)})`);
 
     // --- 5. the comparison fails when the wasm build differs ------------------------------------------------------------
     // A wasm game that differs by one player nudged 8 units at one tic (-testnudge, the hook brief 01 made for this), compared with
     // the unperturbed wasm run: the first difference must be at that tic and in the players' state, and the tics before it agree.
     {
       const T = Math.min(600, Math.floor(quit / 3));
-      const r5 = await t.runGame(env, { args: ['-ddemo1', '-testdump' + 'play.dump', '-testquit' + (T + 40), '-testnudge' + T], files: [{ name: 'demo1.dmo' }], read: ['play.dump'], warp: WARP, timeoutMs: 400000 });
+      const r5 = await t.runGame(env, { args: ['-ddemo1', '-testdump' + 'play.dump', '-testquit' + (T + 40), '-testnudge' + T].concat(ARM ? ['-testarm'] : []), files: [{ name: 'demo1.dmo' }], read: ['play.dump'], warp: WARP, timeoutMs: 400000 });
       const nd = r5.files['play.dump'];
       const ref = wd;      // the unperturbed wasm run (which is equal to the clang native one, checked above)
       const d = nd ? firstDiff(ref.subarray(0, nd.length), nd) : { tic: -1, parts: ['no dump'] };
@@ -277,7 +280,7 @@ async function main() {
         mounts['/f/wasm1.dmo'] = wp;
         const q2 = rtics - 10;
         const [nA, nC] = await Promise.all([nativePlay('rev-gcc', DUKE, wdemo), nativePlay('rev-clang', clang, wdemo)]);
-        const r7 = await t.runGame(env, { args: ['-dwasm1', '-testdump' + 'play.dump', '-testquit' + q2], files: [{ name: 'wasm1.dmo' }], read: ['play.dump'], warp: WARP, timeoutMs: 300000 });
+        const r7 = await t.runGame(env, { args: ['-dwasm1', '-testdump' + 'play.dump', '-testquit' + q2].concat(ARM ? ['-testarm'] : []), files: [{ name: 'wasm1.dmo' }], read: ['play.dump'], warp: WARP, timeoutMs: 300000 });
         const w7 = r7.files['play.dump'];
         t.check(r7.state === 'ended' && !!w7 && w7.length / 32 === q2, `wasm: played its own demo (${w7 ? w7.length / 32 : 0} records)`);
         t.check(!!nA.dump && nA.dump.length / 32 === q2, `native: played the browser's demo (${nA.dump ? nA.dump.length / 32 : 0} records)`);
@@ -287,9 +290,7 @@ async function main() {
           const dra = firstDiff(nA.dump, w7);
           const drc = nC.dump ? firstDiff(nA.dump, nC.dump) : null;
           console.log(`  browser-recorded demo, first difference, gcc native against clang native: ${describe(drc)}; gcc native against wasm: ${describe(dra)}`);
-          if (dra === null) { t.check(true, 'browser-recorded demo: gcc native and wasm are identical too (no debris in this demo)'); }
-          else { xfail('D15', false, 'browser-recorded demo, gcc native against wasm', `first difference at ${describe(dra)}`); }
-          if (dra && !STRICT && KNOWN.D15) { t.check(sameSpot(dra, drc), 'browser-recorded demo: gcc native against wasm differ only where gcc native and clang native differ (D15)', `${describe(dra)} against ${describe(drc)}`); }
+          t.check(dra === null, `browser-recorded demo: gcc native and wasm give the same ${q2} records (first difference: ${describe(dra)})`);
         }
       }
     }

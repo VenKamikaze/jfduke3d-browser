@@ -117,7 +117,15 @@ enum {
 
 #define    ALT_IS_PRESSED ( KB_KeyPressed( sc_RightAlt ) || KB_KeyPressed( sc_LeftAlt ) )
 #define    SHIFTS_IS_PRESSED ( KB_KeyPressed( sc_RightShift ) || KB_KeyPressed( sc_LeftShift ) )
-#define    RANDOMSCRAP EGS(s->sectnum,s->x+(TRAND&255)-128,s->y+(TRAND&255)-128,s->z-(8<<8)-(TRAND&8191),SCRAP6+(TRAND&15),-8,48,48,TRAND&2047,(TRAND&63)+64,-512-(TRAND&2047),i,5)
+/* The random numbers are drawn into locals, last argument first: the order in which
+   the arguments of a call are evaluated is unspecified, and this is the order gcc
+   (x86-64) used, so demos and games recorded with it keep playing back the same. */
+#define    RANDOMSCRAP do { \
+        int rs0, rs1, rs2, rs3, rs4, rs5, rs6; \
+        rs6 = TRAND&2047; rs5 = TRAND&63; rs4 = TRAND&2047; rs3 = TRAND&15; \
+        rs2 = TRAND&8191; rs1 = TRAND&255; rs0 = TRAND&255; \
+        EGS(s->sectnum,s->x+rs0-128,s->y+rs1-128,s->z-(8<<8)-rs2,SCRAP6+rs3,-8,48,48,rs4,rs5+64,-512-rs6,i,5); \
+    } while(0)
 
 #define    BLACK 0
 #define    DARKBLUE 1

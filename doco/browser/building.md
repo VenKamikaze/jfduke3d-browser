@@ -154,7 +154,7 @@ make test-web                               # the ones below, one after the othe
 node tests/web/grptable.js                  # brief 03: web/grptable.js equals src/grpscan.c (`--write` regenerates it); the page's CRC-32 equals zlib's (no browser, a few seconds)
 node tests/web/data.js                      # brief 03: download and progress, the IndexedDB cache, errors, the file picker, quota, config changes, the shareware network gate (about 4 minutes)
 node tests/web/con.js                       # brief 03: CON scripts come from the GRP only, except in test mode (about 2 minutes)
-node tests/web/determinism.js               # brief 03: the same demo played natively and in the browser gives the same -testdump, tic for tic (about 10 minutes; see its header, and bugs.md D15)
+node tests/web/determinism.js               # brief 03: the same demo played natively (gcc and clang) and in the browser gives the same -testdump, tic for tic (about 10 minutes; see its header; strict since F-D15)
 node tests/web/smoke.js                     # intro, menu, a level, Escape, pointer, quit; no errors
 node tests/web/persist.js                   # settings and saves survive a reload (also one without quitting, and one 250 ms after a save)
 node tests/web/focus.js                     # brief 02c: a refused pointer lock or a lost focus does not end the game; a trap still does (about 1 minute)
@@ -198,6 +198,7 @@ Brief 03 added:
 | `src/gamedef.c`, `src/game.c` | CON scripts from the GRP only under `__EMSCRIPTEN__` (`-testloosecon` lifts it in test mode) |
 | `tests/web/data.js`, `dataserver.js`, `grptable.js`, `con.js`, `determinism.js` | the tests |
 | `tests/tools/synth_input.c`, `tests/tools/build-native-clang.sh` | the scripted player for recording a demo, and a clang native build (for `determinism.js`) |
+| `tests/tools/krand-order.py`, `tests/tools/krand-equiv.py` | F-D15: `krand-order.py` lists every place that draws two or more random numbers in one expression (clang's AST; 15 seconds; must print none; part of `make test`, skipped without clang); `krand-equiv.py OLD_TREE NEW_TREE` proves by AST that a change which draws into locals draws the same numbers in the same order and uses them the same way |
 
 Brief 02 added:
 
@@ -236,7 +237,7 @@ AllowSharewareNetGames = 1
 
 Registered data always allows them. The shareware licence ([3][D]) does not give permission for online multiplayer services, so shareware netplay is meant for a LAN. The examples above and all the tests pass the switch.
 
-**Test-only arguments** (after `--`; `src/testhooks.h`): `-testquit<N>` quit with status 0 after the N-th tic of the level (also in single player and demo playback), `-testsync` a sync byte of the whole state every tic (every player must use it), `-testnudge<T>` move this player 8 units at tic T (a desync on purpose), `-testdump<name>` write a 32 byte record per tic to `<name>` (read it with `tests/tools/testdump.py`), `-teststate[<T>]` also `<name>.state`, the state as text, `-testexit<T>` end the first level at tic T (every player must have it), `-teststall<T>,<ms>` stop this machine for `<ms>` ms at tic T of the first level, `-testfire[<N>]` hold fire with the chaingun and walk about from tic N (every player must have it), `-testpredict` check that the prediction never changes the simulation (A1), `-testmenu` print `TEST: menu N` whenever the menu of a game opens, changes or closes (D3). A run with `-testquit` ends by itself; `scripts/run-headless.sh` runs one and returns the game's status.
+**Test-only arguments** (after `--`; `src/testhooks.h`): `-testquit<N>` quit with status 0 after the N-th tic of the level (also in single player and demo playback), `-testsync` a sync byte of the whole state every tic (every player must use it), `-testnudge<T>` move this player 8 units at tic T (a desync on purpose), `-testdump<name>` write a 32 byte record per tic to `<name>` (read it with `tests/tools/testdump.py`), `-teststate[<T>]` also `<name>.state`, the state as text, `-testexit<T>` end the first level at tic T (every player must have it), `-teststall<T>,<ms>` stop this machine for `<ms>` ms at tic T of the first level, `-testfire[<N>]` hold fire with the chaingun and walk about from tic N (every player must have it), `-testpredict` check that the prediction never changes the simulation (A1), `-testmenu` print `TEST: menu N` whenever the menu of a game opens, changes or closes (D3). `-testarm` every weapon, full ammunition and health in every tic (F-D15: the scripted player of `determinism.js`; give it to the recording and to every playback of the demo). A run with `-testquit` ends by itself; `scripts/run-headless.sh` runs one and returns the game's status.
 
 Tests (all local, on 127.0.0.1, ports from `JFDUKE3D_TEST_PORT_BASE`, default 47400; they build the relay with Go into `~/.cache/jfduke3d-browser` the first time; each stops every process it started; keep `JFDUKE3D_TEST_KEEP=1` to keep a test's directory, `JFDUKE3D_TEST_VERBOSE=1` for the logs of a failing game):
 

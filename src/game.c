@@ -7053,6 +7053,9 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"testfire",8)) {
                     TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
                 }
+                else if (!Bstrcasecmp(c,"testarm")) {
+                    TestArmArg();               // test-only: every weapon, full ammunition and health in every tic
+                }
                 else if (!Bstrcasecmp(c,"name")) {
                     if (argc > i+1) {
                         CommandName = argv[i+1];
@@ -9992,7 +9995,7 @@ void cameratext(short i)
 
 void vglass(int x,int y,short a,short wn,short n)
 {
-    int z, zincs;
+    int z, zincs, r0, r1, r2, r3;
     short sect;
 
     sect = wall[wn].nextsector;
@@ -10000,12 +10003,18 @@ void vglass(int x,int y,short a,short wn,short n)
     zincs = ( sector[sect].floorz-sector[sect].ceilingz ) / n;
 
     for(z = sector[sect].ceilingz;z < sector[sect].floorz; z += zincs )
-        EGS(sect,x,y,z-(TRAND&8191),GLASSPIECES+(z&(TRAND%3)),-32,36,36,a+128-(TRAND&255),16+(TRAND&31),0,-1,5);
+    {
+        r3 = TRAND&31;
+        r2 = TRAND&255;
+        r1 = TRAND%3;
+        r0 = TRAND&8191;
+        EGS(sect,x,y,z-r0,GLASSPIECES+(z&r1),-32,36,36,a+128-r2,16+r3,0,-1,5);
+    }
 }
 
 void lotsofglass(short i,short wallnum,short n)
 {
-     int j, xv, yv, z, x1, y1;
+     int j, xv, yv, z, x1, y1, r0, r1;
      short sect, a;
 
      sect = -1;
@@ -10015,7 +10024,9 @@ void lotsofglass(short i,short wallnum,short n)
         for(j=n-1; j >= 0 ;j--)
         {
             a = SA-256+(TRAND&511)+1024;
-            EGS(SECT,SX,SY,SZ,GLASSPIECES+(j%3),-32,36,36,a,32+(TRAND&63),1024-(TRAND&1023),i,5);
+            r1 = TRAND&1023;
+            r0 = TRAND&63;
+            EGS(SECT,SX,SY,SZ,GLASSPIECES+(j%3),-32,36,36,a,32+r0,1024-r1,i,5);
         }
         return;
      }
@@ -10046,20 +10057,25 @@ void lotsofglass(short i,short wallnum,short n)
               if( z < -(32<<8) || z > (32<<8) )
                   z = SZ-(32<<8)+(TRAND&((64<<8)-1));
               a = SA-1024;
-              EGS(SECT,x1,y1,z,GLASSPIECES+(j%3),-32,36,36,a,32+(TRAND&63),-(TRAND&1023),i,5);
+              r1 = TRAND&1023;
+              r0 = TRAND&63;
+              EGS(SECT,x1,y1,z,GLASSPIECES+(j%3),-32,36,36,a,32+r0,-r1,i,5);
           }
          }
 }
 
 void spriteglass(short i,short n)
 {
-    int j, k, a, z;
+    int j, k, a, z, r0, r1, r2;
 
     for(j=n;j>0;j--)
     {
         a = TRAND&2047;
         z = SZ-((TRAND&16)<<8);
-        k = EGS(SECT,SX,SY,z,GLASSPIECES+(j%3),TRAND&15,36,36,a,32+(TRAND&63),-512-(TRAND&2047),i,5);
+        r2 = TRAND&2047;
+        r1 = TRAND&63;
+        r0 = TRAND&15;
+        k = EGS(SECT,SX,SY,z,GLASSPIECES+(j%3),r0,36,36,a,32+r1,-512-r2,i,5);
         sprite[k].pal = sprite[i].pal;
     }
 }
@@ -10095,7 +10111,7 @@ void ceilingglass(short i,short sectnum,short n)
 
 void lotsofcolourglass(short i,short wallnum,short n)
 {
-     int j, xv, yv, z, x1, y1;
+     int j, xv, yv, z, x1, y1, r0, r1, r2;
      short sect = -1, a, k;
 
      if(wallnum < 0)
@@ -10103,7 +10119,10 @@ void lotsofcolourglass(short i,short wallnum,short n)
         for(j=n-1; j >= 0 ;j--)
         {
             a = TRAND&2047;
-            k = EGS(SECT,SX,SY,SZ-(TRAND&(63<<8)),GLASSPIECES+(j%3),-32,36,36,a,32+(TRAND&63),1024-(TRAND&2047),i,5);
+            r2 = TRAND&2047;
+            r1 = TRAND&63;
+            r0 = TRAND&(63<<8);
+            k = EGS(SECT,SX,SY,SZ-r0,GLASSPIECES+(j%3),-32,36,36,a,32+r1,1024-r2,i,5);
             sprite[k].pal = TRAND&15;
         }
         return;
@@ -10126,7 +10145,9 @@ void lotsofcolourglass(short i,short wallnum,short n)
           if( z < -(32<<8) || z > (32<<8) )
               z = SZ-(32<<8)+(TRAND&((64<<8)-1));
           a = SA-1024;
-          k = EGS(SECT,x1,y1,z,GLASSPIECES+(j%3),-32,36,36,a,32+(TRAND&63),-(TRAND&2047),i,5);
+          r1 = TRAND&2047;
+          r0 = TRAND&63;
+          k = EGS(SECT,x1,y1,z,GLASSPIECES+(j%3),-32,36,36,a,32+r0,-r1,i,5);
           sprite[k].pal = TRAND&7;
          }
 }

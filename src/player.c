@@ -116,7 +116,7 @@ void forceplayerangle(struct player_struct *p)
 
 void tracers(int x1,int y1,int z1,int x2,int y2,int z2,int n)
 {
-     int i, xv, yv, zv;
+     int i, xv, yv, zv, r0, r1, r2;
      short sect = -1;
 
      i = n+1;
@@ -136,7 +136,12 @@ void tracers(int x1,int y1,int z1,int x2,int y2,int z2,int n)
           if(sect >= 0)
           {
               if(sector[sect].lotag == 2)
-                  EGS(sect,x1,y1,z1,WATERBUBBLE,-32,4+(TRAND&3),4+(TRAND&3),TRAND&2047,0,0,ps[0].i,5);
+              {
+                  r2 = TRAND&2047;
+                  r1 = TRAND&3;
+                  r0 = TRAND&3;
+                  EGS(sect,x1,y1,z1,WATERBUBBLE,-32,4+r0,4+r1,r2,0,0,ps[0].i,5);
+              }
               else
                   EGS(sect,x1,y1,z1,SMALLSMOKE,-32,14,14,0,0,0,ps[0].i,5);
           }
@@ -2581,7 +2586,12 @@ void processinput(short snum)
                 closedemowrite();
 
             if(s->pal != 1)
-                p->dead_flag = (512-((TRAND&1)<<10)+(TRAND&255)-512)&2047;
+            {
+                int r0, r1;
+                r1 = TRAND&255;
+                r0 = TRAND&1;
+                p->dead_flag = (512-(r0<<10)+r1-512)&2047;
+            }
 
             p->jetpack_on = 0;
             p->holoduke_on = -1;

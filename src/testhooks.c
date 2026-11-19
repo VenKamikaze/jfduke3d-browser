@@ -14,18 +14,20 @@ int TestQuitTics = 0;
 int TestNudgeTic = -1;
 static int TestExitTic;         // -testexit<T>; 0 = off
 static int TestFireOn, TestFireFrom;
+static int TestArmOn;           // -testarm
 static int TestLevelNo;         // the number of the level being played: 1 for the first, counted at its tic 1
 
 void TestSyncArg(void)         { TestSyncOn = 1; }
 void TestQuitArg(int tics)     { TestQuitTics = tics; }
 void TestNudgeArg(int tic)     { TestNudgeTic = tic; }
 
-// Added to the version byte of packet 6: only -testsync changes what is on the wire, so only it
-// needs every player to agree. (jfSW also adds the quit tic; there a mismatch is only a log line,
-// here a mismatch ends the game with a message, and a different -testquit is harmless to the game.)
+// Added to the version byte of packet 6: -testsync changes what is on the wire; -testexit, -testfire and -testarm
+// change the simulation (every player must have them, or the game desyncs), so players that differ are refused.
+// (jfSW also adds the quit tic; there a mismatch is only a log line, here a mismatch ends the game with a message,
+// and a different -testquit is harmless to the game.)
 int TestVersionSalt(void)
 {
-    return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0);
+    return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0) + (TestArmOn ? 64 : 0);
 }
 
 int TestSyncTic(int index)
@@ -429,6 +431,7 @@ static int TestStallTic, TestStallMs, TestStallDone;
 
 void TestExitArg(int tic)  { TestExitTic = tic; }
 void TestFireArg(int tic)  { TestFireOn = 1; TestFireFrom = tic; }
+void TestArmArg(void)      { TestArmOn = 1; }
 
 void TestStallArg(const char *arg)
 {
@@ -606,6 +609,20 @@ void TestTicHook(void)
             resetweapons(i);
             ps[i].gotweapon[CHAINGUN_WEAPON] = 1;
             ps[i].ammo_amount[CHAINGUN_WEAPON] = 300;
+        }
+    }
+
+    // -testarm: a scripted player with every weapon, full ammunition and health, so that a recorded demo goes on
+    // through every kind of shooting and explosion (the demos of D15's tests). Plain simulation state set in the
+    // same tic on every machine and in a demo's playback, as long as the argument is given to both.
+    if (TestArmOn) {
+        int i, w;
+        for (i = connecthead; i >= 0; i = connectpoint2[i]) {
+            if (tic == 1)
+                for (w = PISTOL_WEAPON; w < MAX_WEAPONS; w++) ps[i].gotweapon[w] = 1;
+            for (w = PISTOL_WEAPON; w < MAX_WEAPONS; w++)
+                if (ps[i].ammo_amount[w] < max_ammo_amount[w] / 2) ps[i].ammo_amount[w] = max_ammo_amount[w];
+            sprite[ps[i].i].extra = max_player_health;
         }
     }
 
