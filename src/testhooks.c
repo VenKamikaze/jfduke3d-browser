@@ -55,10 +55,11 @@ int TestSyncTic(int index)
 //             each player announces (packet 6: aim_mode, auto_aim, weaponswitch, ud.wchoice and
 //             the name) are in it: every machine must hold every player's (bugs.md D1, fixed)
 //   sprites   every sprite in use (statnum < MAXSTATUS): every field (but yoffset of a player's
-//             sprite, statnum 10: the drawing code writes it), and the order of the status lists
-//             and the sector lists (the order the game moves things in)
+//             sprite, statnum 10, and the owner of a security monitor: the drawing code writes them),
+//             and the order of the status lists and the sector lists (the order the game moves things in)
 //   hittype   hittype[] of every sprite in use: every field and temp_data (but not those of the ambient
-//             sound sprites, see below) and not dispicnum, which animatesprites() in the drawing code
+//             sound sprites, see below, and not temp_data[0] of a security monitor, which counts the frames
+//             its camera was drawn) and not dispicnum, which animatesprites() in the drawing code
 //             sets (to the picture last drawn): it is what a machine has drawn so far, and differs
 //             between machines (it was the first difference seen, in the first tic of the first test)
 //   sectors   sector[0 .. numsectors-1]: every field
@@ -89,6 +90,10 @@ static int PtrOffset(const int *p)
         return 0x2000000 + (int)(c - (const char *)sprite);
     return -2;
 }
+
+// a security monitor (viewscreen): the one kind of sprite whose fields the drawing code writes besides dispicnum
+// and a player's yoffset
+#define IsMonitor(s) ((s)->statnum == 6 && ((s)->picnum == VIEWSCREEN || (s)->picnum == VIEWSCREEN2 || (s)->picnum == VIEWSCREENBROKE))
 
 static void WalkState(emit_fn e)
 {
@@ -159,7 +164,12 @@ static void WalkState(emit_fn e)
         // animatesprites() (drawing, game.c) writes yoffset of a player's sprite while it is in the
         // air: not simulation state, and it differs between machines (the first difference seen)
         if (s->statnum != 10) S(yoffset);
-        S(sectnum); S(statnum); S(ang); S(owner); S(xvel); S(yvel); S(zvel);
+        S(sectnum); S(statnum); S(ang);
+        // a security monitor's owner is the camera it shows: the use key sets it (sector.c), and animatecamsprite()
+        // (drawing) overwrites it with the player's newowner on a machine that draws: nothing in the simulation reads
+        // it (code-facts.md section 20), so it is not compared
+        if (!IsMonitor(s)) S(owner);
+        S(xvel); S(yvel); S(zvel);
         S(lotag); S(hitag); S(extra);
     }
     // the order of the lists: the game moves things in list order
@@ -186,7 +196,13 @@ static void WalkState(emit_fn e)
         // and T5 as audio bookkeeping from this machine's SoundToggle, AmbienceToggle, free voices and
         // the view point (ps[screenpeek]), so they are a machine's own (the second difference seen)
         if (!(sprite[i].statnum == 11 && sprite[i].picnum == MUSICANDSFX))
-            for (k = 0; k < 6; k++) { sprintf(nm, "temp_data%d", k); E(PART_HITTYPE, i, nm, t->temp_data[k]); }
+            for (k = 0; k < 6; k++) {
+                // a security monitor's temp_data[0] counts the frames its camera has been drawn (animatecamsprite(),
+                // drawing, sector.c); the simulation only tests it for 1 to reset camsprite, a global that only drawing
+                // reads (actors.c): not compared (code-facts.md section 20)
+                if (k == 0 && IsMonitor(&sprite[i])) continue;
+                sprintf(nm, "temp_data%d", k); E(PART_HITTYPE, i, nm, t->temp_data[k]);
+            }
     }
 #undef T
 

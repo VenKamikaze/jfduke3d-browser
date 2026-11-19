@@ -488,6 +488,542 @@ SCENARIOS.mixed3 = {
   },
 };
 
+// ---- impairment ---------------------------------------------------------------------------------------
+
+const IMPAIR = (i) => (process.env.NETPLAY_IMPAIR || 'lat=30,jit=10,loss=4,dup=2,reorder=3') + ',seed=' + (101 + i);     // (NETPLAY_IMPAIR: a harsher spec, as a control)
+SCENARIOS.impaired = {
+  what: 'loss, duplication, reordering and latency on every machine (a seed each): browser host and native slave over WebSocket, then three browsers',
+  run: async () => {
+    await bounded('impaired', ['browser', 'native'], { impair: IMPAIR }, 'relay-ws');
+    await bounded('impaired3', ['browser', 'browser', 'browser'], { impair: IMPAIR }, 'relay-ws');
+  },
+};
+
+// Two browsers over WebTransport (a -dev-cert relay: the certificate hash and the URL are test knobs), and a native host with
+// two browsers. Chromium here may not do WebTransport to a local development certificate: the scenario says so if it does not.
+const WT = (i, relay) => '&relay_wt=' + encodeURIComponent(relay.wt) + '&relay_cert=' + relay.cert;
+SCENARIOS.wt = {
+  what: 'two browsers over WebTransport (a -dev-cert relay, the certificate hash as a test knob), and a native player in the room',
+  run: async () => {
+    await bounded('wt', ['browser', 'browser'], { query: WT }, 'relay-wt');
+    await bounded('wt-native', ['native', 'browser', 'browser'], { query: WT }, 'relay-wt');
+  },
+};
+
+// ---- a level exit (A1's -testexit) with browsers ----------------------------------------------------------
+// Every machine leaves E1L1 at tic 200 (the game's own writer of MODE_EOL, run inside the tic: player.c) and plays 300 tics of E1L2,
+// the players firing the chaingun and walking about (-testfire: the ammunition carried over changes every few tics, and a missing
+// or extra tic would move a player somewhere else). The dumps (500 records, the 201st is tic 1 of the next level) and the state at
+// the next level's start, its tic 1, 2 and 300 must agree. With a hidden tab (hiddenIdx) the tab draws nothing of either level.
+const EXIT_TIC = 200, EXIT_TICS = 300;
+async function levelExitGame(kinds, hiddenIdx, o) {
+  o = o || {};
+  const relay = await startRelay();
+  try {
+    console.log('  ' + kinds.join(' + ') + (hiddenIdx !== undefined ? ', ' + kinds[hiddenIdx] + ' ' + hiddenIdx + ' hidden from the start' : '') + ' (' + LOAD() + ')');
+    const ms = await room(relay, kinds, { tics: EXIT_TICS, state: true, extra: () => ['-testexit' + EXIT_TIC, '-testfire150'].concat(o.extra || []),
+      query: (i) => (i === hiddenIdx ? '' : '') });
+    let framesAtHide = null;
+    if (hiddenIdx !== undefined) {
+      const h = ms[hiddenIdx];
+      // hidden as soon as its game has started and written a few tics
+      const t0 = now();
+      while (now() - t0 < 60000 && (await h.dumpSize()) < 5 * REC) { await sleep(100); }
+      await hide(h.page, true);
+      await sleep(300);
+      framesAtHide = await h.page.evaluate(() => Module.jfswShowframes);
+      console.log('  ' + h.name + ' hidden at tic ' + Math.floor((await h.dumpSize()) / REC));
+    }
+    for (const m of ms) { await m.waitEnd((EXIT_TIC + EXIT_TICS) / NOMINAL * 1000 * 3 + 90000); }
+    const dumps = await checkGame(ms, EXIT_TIC + EXIT_TICS, { lastLevelTics: EXIT_TICS });
+    for (const m of ms) {
+      const out = await m.out();
+      check(new RegExp('TEST: ending the level at tic ' + EXIT_TIC + ' ').test(out), m.name + ' ended the first level at tic ' + EXIT_TIC);
+      const left = /TEST: left the level after tic (\d+)/.exec(out);
+      check(!!left && +left[1] === EXIT_TIC, m.name + ' played exactly ' + EXIT_TIC + ' tics of the first level (' + (left ? left[1] : '?') + ')');
+    }
+    if (dumps.every((d) => d && d.length >= (EXIT_TIC + 1) * REC)) {
+      check(dumps.every((d) => d.readUInt32LE(EXIT_TIC * REC) === 1), 'record ' + (EXIT_TIC + 1) + ' of every dump is tic 1 of the next level');
+    }
+    // the state dumps: at the next level's start (its tic 1 and 2) and at its last tic
+    const states = [];
+    for (const m of ms) { const b = await m.readFile('d.bin.state'); states.push(b ? parseState(b.toString()) : null); }
+    check(states.every(Boolean), 'every machine wrote its state dump');
+    if (states.every(Boolean)) {
+      for (const when of ['t1 L2', 't2 L2', 't' + EXIT_TICS + ' L2']) {
+        for (let k = 1; k < ms.length; k++) {
+          const d = stateDifferences(states[0], states[k], when);
+          check(d.length === 0, 'the state of ' + ms[k].name + ' agrees with ' + ms[0].name + ' field for field at ' + when, d.slice(0, 6).join('; '));
+        }
+      }
+    }
+    if (hiddenIdx !== undefined) {
+      const h = ms[hiddenIdx];
+      const f = await h.page.evaluate(() => ({ frames: Module.jfswShowframes, passes: Module.jfswHiddenLog.length })).catch(() => null);
+      if (f) {
+        console.log('  hidden tab: ' + f.passes + ' hidden passes, ' + (f.frames - framesAtHide) + ' pictures asked for after it was hidden (across both levels)');
+        check(f.frames - framesAtHide < 20, h.name + ' drew nothing of either level while hidden (' + (f.frames - framesAtHide) + ' pictures asked for after hiding)');
+        check(f.passes > 100, h.name + ' was driven by hidden-tab passes (' + f.passes + ')');
+      }
+    }
+    return ms;
+  } finally { await cleanup(relay); }
+}
+SCENARIOS['level-exit'] = {
+  what: 'a level exit with browsers (A1\'s -testexit): a browser host, a native and a browser joiner leave E1L1 at tic 200 and play 300 tics of E1L2; dumps and states agree',
+  run: () => levelExitGame(['browser', 'native', 'browser']),
+};
+SCENARIOS['hidden-level'] = {
+  what: 'a level exit with a browser slave hidden from the start: it draws nothing of either level, every machine agrees through the level change',
+  run: async () => {
+    await levelExitGame(['browser', 'browser'], 1);
+    await levelExitGame(['native', 'browser'], 1);
+  },
+};
+
+// ---- a hidden tab (brief 04) ------------------------------------------------------------------------------
+// A hidden, throttled tab as slave or as host: the room must keep at least 90 % of the nominal tic rate, measured on
+// the OTHER machine (the one that is visible), over at least 30 s; and everyone still agrees.
+const HIDDEN_TICS = 1500, FROM = 250, TO = 1450;
+async function hiddenRoom(kinds, hiddenIndex, opts) {
+  opts = opts || {};
+  const want = (opts.nominal || NOMINAL);
+  const relay = await startRelay();
+  try {
+    console.log('  ' + kinds.join(' + ') + ', ' + (hiddenIndex === 0 ? 'the host' : 'the slave') + ' hidden (' + LOAD() + ')');
+    const ms = await room(relay, kinds, { tics: opts.tics || HIDDEN_TICS, query: opts.wakeEvery ? (i) => (i === hiddenIndex ? '&wake_every=' + opts.wakeEvery : '') : null });
+    const h = ms[hiddenIndex];
+    let hideTic = -1, tHide = 0, hidden = false, framesAtHide = 0, hiddenLogAtHide = 0, froze = false, fp = null;
+    const series = await sample(ms, opts.tics || HIDDEN_TICS, HIDDEN_TICS / NOMINAL * 1000 * 2.5 + 40000, async (t, ser) => {
+      const tics = ser[hiddenIndex][ser[hiddenIndex].length - 1][1];
+      if (!hidden && tics >= 100 && h.kind === 'browser') {
+        hidden = true;
+        await hide(h.page, true);
+        await sleep(300);
+        framesAtHide = await h.page.evaluate(() => Module.jfswShowframes);
+        hiddenLogAtHide = await h.page.evaluate(() => Module.jfswHiddenLog.length);
+        hideTic = Math.floor((await h.dumpSize()) / REC);
+        tHide = now();
+        console.log('  ' + h.name + ' hidden at tic ' + hideTic);
+      }
+      if (opts.freeze && hidden && !froze && tics >= 300) {
+        froze = true;
+        console.log('  freezing the hidden ' + h.name + ' for ' + opts.freeze + ' ms at tic ' + tics);
+        fp = freeze(h.page, opts.freeze);      // not awaited: the others are watched meanwhile
+      }
+    });
+    if (fp) { await fp; }
+    const tEnd = now();
+    const logEnd = await h.page.evaluate(() => Module.jfswHiddenLog.length).catch(() => 0);
+    for (const m of ms) { await m.waitEnd(30000); }
+    const wakes = await h.page.evaluate(() => ({ wakes: Module.jfswWakes, log: Module.jfswHiddenLog.length, frames: Module.jfswShowframes, reasons: Module.jfswHiddenLog.reduce((a, r) => { a[r] = (a[r] || 0) + 1; return a; }, {}), owed: Module.jfswOwedLog.slice() })).catch(() => null);
+    await checkGame(ms, opts.tics || HIDDEN_TICS);
+    // The rate window starts a margin after the tab was hidden (and after the stall and the catching up, if there was one).
+    const fromT = Math.max(opts.freeze ? 700 : FROM, hideTic + 100);
+    check(hideTic >= 0 && hideTic + 100 <= fromT, h.name + ' was hidden at tic ' + hideTic + ', before the rate window (tic ' + fromT + ' to ' + TO + ') began');
+    const rates = ms.map((m, i) => rate(series[i], fromT, TO));
+    console.log('  tic rates between tic ' + fromT + ' and ' + TO + ': ' + ms.map((m, i) => m.name + (i === hiddenIndex ? '(hidden)' : '') + ' ' + rates[i].toFixed(1)).join(', ') + ' (nominal ' + want + '); ' + LOAD());
+    for (let i = 0; i < ms.length; i++) {
+      if (i === hiddenIndex) { continue; }
+      check(rates[i] >= 0.9 * want, ms[i].name + ' (visible) ran at ' + rates[i].toFixed(1) + ' tics a second, at least 90% of ' + want, 'got ' + rates[i].toFixed(1));
+    }
+    check(rates[hiddenIndex] >= 0.9 * want, h.name + ' (hidden) ran at ' + rates[hiddenIndex].toFixed(1) + ' tics a second too', 'got ' + rates[hiddenIndex].toFixed(1));
+    if (opts.freeze) {
+      // The visible machines go on producing inputs (up to 100 ahead) while the hidden tab is stuck; when it runs again the
+      // game's own lag correction (a slave moves its clock on by the lag it measures) lets it hand them in faster than
+      // nominal, so the room is late by less than the whole stall.
+      const v = series[ms.findIndex((m, i) => i !== hiddenIndex)];
+      const t0 = (v.find((x) => x[1] >= 300) || [0])[0], t1 = (v.find((x) => x[1] >= 1400) || [0])[0];
+      const late = (t1 - t0) / 1000 - (1400 - 300) / NOMINAL;
+      console.log('  the visible machine took ' + ((t1 - t0) / 1000).toFixed(1) + ' s for tics 300 to 1400 (' + ((1400 - 300) / NOMINAL).toFixed(1) + ' s at the nominal rate): late by ' + late.toFixed(1) + ' s, after a ' + opts.freeze / 1000 + ' s stall');
+      check(late < opts.freeze / 1000 - 1, 'the room made up most of the stall (late by ' + late.toFixed(1) + ' s, not the whole ' + opts.freeze / 1000 + ' s)', late.toFixed(1));
+      check(late > 0.2, 'and the stall really delayed it (late by ' + late.toFixed(1) + ' s)');
+    }
+    if (wakes) {
+      console.log('  hidden tab: ' + wakes.wakes + ' wake-ups, ' + wakes.log + ' hidden yields (resumed by: ' + JSON.stringify(wakes.reasons) + ': 1 network event, 0 timer), ' + wakes.frames + ' pictures asked for in all (' + framesAtHide + ' when it was hidden)');
+      // a thinned tab (hidden-thin) gets only every Nth wake-up: it needs a lower bar of its own
+      const minPasses = opts.wakeEvery ? 150 : 200;
+      check(wakes.log - hiddenLogAtHide > minPasses, h.name + ' was driven by hidden-tab passes (' + (wakes.log - hiddenLogAtHide) + ' after it was hidden, more than ' + minPasses + ')');
+      check((wakes.reasons[1] || 0) > 0.8 * wakes.log, h.name + ' was resumed by network events, not the timer (' + (wakes.reasons[1] || 0) + ' of ' + wakes.log + ')');
+      // an input that is made but held back by mmulti's 25 ms send window must not wait for the next network event: the pass
+      // flushes it. So (almost) no yield is entered with data still owed.
+      const passesPerSec = (logEnd - hiddenLogAtHide) / ((tEnd - tHide) / 1000);
+      console.log('  hidden passes (yields) a second while hidden: ' + passesPerSec.toFixed(0) + '; entered with data still held back: ' + wakes.owed.length + ' of ' + wakes.log);
+      check(wakes.owed.length <= 0.01 * wakes.log + 5, h.name + ' entered ' + wakes.owed.length + ' of ' + wakes.log + ' yields with data still held back (at most 1% and 5: a few come at the hide and at the end)');
+      // CPU: the tab must not spin. Every pass is a network event or the timer.
+      check(passesPerSec < 150, h.name + ' ran ' + passesPerSec.toFixed(0) + ' hidden passes a second (under 150: it waits for network events)');
+      check(wakes.frames - framesAtHide < 20, h.name + ' drew nothing while hidden (' + (wakes.frames - framesAtHide) + ' pictures asked for after hiding, in about 45 s)');
+    }
+  } finally { await cleanup(relay); }
+}
+SCENARIOS['hidden-slave'] = {
+  what: 'a hidden, throttled browser slave: the room keeps at least 90% of 30 tics a second, all agree',
+  run: () => hiddenRoom(['browser', 'browser'], 1),
+};
+SCENARIOS['hidden-frozen'] = {
+  what: 'a hidden slave whose main thread is stuck for 3 s mid-game: the room waits, catches up most of the stall, and every machine agrees',
+  run: () => hiddenRoom(['browser', 'browser'], 1, { freeze: 3000 }),
+};
+// The same with the hidden tab's network wake-ups thinned to every 6th (as if the peer were quiet, or the events bunched).
+SCENARIOS['hidden-thin'] = {
+  what: 'a hidden slave that gets only every 6th network wake-up: still 90% of 30 tics a second',
+  run: () => hiddenRoom(['browser', 'browser'], 1, { wakeEvery: +process.env.NETPLAY_WAKE_EVERY || 6 }),
+};
+SCENARIOS['hidden-host'] = {
+  what: 'a hidden, throttled browser host with a native slave: the same',
+  run: () => hiddenRoom(['browser', 'native'], 0),
+};
+SCENARIOS['hidden-local'] = {
+  what: 'a single player game in a hidden tab still pauses (no hidden-tab passes, the picture is still drawn)',
+  run: async () => {
+    try {
+      const m = await browserMachine('single', ['-v1', '-l1', '-s1', '-testdumpd.bin'], { dump: 'd.bin' });
+      await m.start();
+      // let it run visible for a while: a control, so that the hidden numbers mean something
+      await sleep(14000);
+      const t0 = await m.dumpSize() / REC, f0 = await m.page.evaluate(() => Module.jfswFrameLog.length);
+      await sleep(5000);
+      const t1 = await m.dumpSize() / REC, f1 = await m.page.evaluate(() => Module.jfswFrameLog.length);
+      const visibleRate = (t1 - t0) / 5;
+      check(visibleRate > 0.8 * NOMINAL, 'control: the visible single player game runs at ' + visibleRate.toFixed(1) + ' tics a second', 'got ' + visibleRate.toFixed(1));
+      check(f1 - f0 > 100, 'control: and draws pictures (' + (f1 - f0) + ' frame yields in 5 s)');
+      await hide(m.page, true);
+      await sleep(2000);
+      const h0 = await m.dumpSize() / REC, hf0 = await m.page.evaluate(() => Module.jfswFrameLog.length), hl0 = await m.page.evaluate(() => Module.jfswHiddenLog.length);
+      await sleep(12000);
+      const h1 = await m.dumpSize() / REC, hf1 = await m.page.evaluate(() => Module.jfswFrameLog.length), hl1 = await m.page.evaluate(() => Module.jfswHiddenLog.length);
+      const hiddenRate = (h1 - h0) / 12;
+      console.log('  hidden single player: ' + hiddenRate.toFixed(1) + ' tics a second, ' + (hf1 - hf0) + ' frame yields, ' + (hl1 - hl0) + ' hidden-tab passes in 12 s');
+      check(hl1 === hl0, 'no hidden-tab passes in a single player game (' + (hl1 - hl0) + ')');
+      check(hf1 - hf0 >= 5, 'the game still draws and yields once a frame (' + (hf1 - hf0) + ' frame yields in 12 s)');
+      check(hiddenRate < 0.5 * visibleRate, 'it runs far below normal speed (' + hiddenRate.toFixed(1) + ' against ' + visibleRate.toFixed(1) + ' tics a second): a pause, not a free run');
+    } finally { await cleanup(null); }
+  },
+};
+
+// ---- what drawing writes (the drawing-state audit, code-facts.md section 20) -------------------------------------
+// A browser tab hidden from the start (it draws nothing: the game asks for no picture) plays with machines that draw, in a game that
+// goes where drawing writes to the simulation's tables. The dumps and the states must agree. 'camera': every player stands in front
+// of a security monitor and presses use (-testcam20,0): a machine that draws counts frames in the monitor's hittype temp_data[0];
+// 'mirror': in front of a mirror, firing the RPG from tic 80 (-testmirror20,0): drawn (a second drawrooms()), then broken.
+async function drawStateGame(label, kinds, hiddenIdx, hook, tics) {
+  const relay = await startRelay();
+  try {
+    console.log('  ' + label + ': ' + kinds.join(' + ') + ', ' + kinds[hiddenIdx] + ' ' + hiddenIdx + ' hidden from the start (' + LOAD() + ')');
+    const ms = await room(relay, kinds, { tics, state: true, extra: () => [hook] });
+    const h = ms[hiddenIdx];
+    const t0 = now();
+    while (now() - t0 < 60000 && (await h.dumpSize()) < 3 * REC) { await sleep(50); }
+    await hide(h.page, true);
+    await sleep(300);
+    const framesAtHide = await h.page.evaluate(() => Module.jfswShowframes);
+    console.log('  ' + h.name + ' hidden at tic ' + Math.floor((await h.dumpSize()) / REC));
+    for (const m of ms) { await m.waitEnd(tics / NOMINAL * 1000 * 3 + 90000); }
+    await checkGame(ms, tics);
+    for (const m of ms) {
+      const out = await m.out();
+      if (/-testcam/.test(hook)) { check(/TEST: go: monitor sprite \d+: yvel 1 .*camsprite \d/.test(out), m.name + ': the monitor switched to its camera (' + ((/TEST: go: monitor sprite[^\n]*/.exec(out) || ['none'])[0]) + ')'); }
+      else { check(/TEST: go: mirror wall \d+: overpicnum 70 /.test(out), m.name + ': the mirror was broken (' + ((/TEST: go: mirror wall[^\n]*/.exec(out) || ['none'])[0]) + ')'); }
+    }
+    const states = [];
+    for (const m of ms) { const b = await m.readFile('d.bin.state'); states.push(b ? parseState(b.toString()) : null); }
+    if (states.every(Boolean)) {
+      for (const when of ['t1 L1', 't2 L1', 't' + tics + ' L1']) {
+        for (let k = 1; k < ms.length; k++) {
+          const d = stateDifferences(states[0], states[k], when);
+          check(d.length === 0, 'the state of ' + ms[k].name + ' agrees with ' + ms[0].name + ' field for field at ' + when, d.slice(0, 6).join('; '));
+        }
+      }
+    }
+    const f = await h.page.evaluate(() => ({ frames: Module.jfswShowframes, passes: Module.jfswHiddenLog.length })).catch(() => null);
+    const vis = ms.findIndex((m, i) => i !== hiddenIdx && m.kind === 'browser');
+    const vf = vis >= 0 ? await ms[vis].page.evaluate(() => Module.jfswShowframes).catch(() => 0) : 0;
+    if (f) {
+      console.log('  pictures asked for: ' + (f.frames - framesAtHide) + ' by the hidden tab after it was hidden, ' + vf + ' by the visible browser; ' + f.passes + ' hidden passes');
+      check(f.frames - framesAtHide < 20, h.name + ' drew nothing while hidden (' + (f.frames - framesAtHide) + ' pictures asked for)');
+      if (vis >= 0) { check(vf > tics, ms[vis].name + ' (visible) drew its pictures (' + vf + ')'); }
+    }
+    return ms;
+  } finally { await cleanup(relay); }
+}
+SCENARIOS['draw-state'] = {
+  what: 'a hidden tab (no drawing) and machines that draw stay in sync over security cameras (animatecamsprite) and a mirror (drawn, then broken by rockets)',
+  run: async () => {
+    await drawStateGame('camera', ['browser', 'browser', 'native'], 1, '-testcam20,0', 400);
+    await drawStateGame('mirror', ['browser', 'native', 'browser'], 2, '-testmirror20,0', 500);
+  },
+};
+
+// ---- frozen tabs and a lost relay session --------------------------------------------------------------------
+
+// A tab whose main thread is blocked for 5 s in the middle of a game: the room waits, goes on, all agree.
+const FREEZE_MS = +process.env.NETPLAY_FREEZE_MS || 5000;      // (a longer freeze is the negative control: the relay drops a silent member after 15 s)
+async function frozenRoom(kinds, frozenIndex) {
+  const relay = await startRelay();
+  try {
+    console.log('  ' + kinds.join(' + ') + ', ' + (frozenIndex === 0 ? 'the host' : 'the slave') + ' frozen for ' + FREEZE_MS / 1000 + ' s (' + LOAD() + ')');
+    const ms = await room(relay, kinds, { tics: TICS });
+    const f = ms[frozenIndex];
+    let froze = false, before = [], fp = null, t0 = 0, t1 = 0, tf = 0;
+    const series = await sample(ms, TICS, TICS / NOMINAL * 1000 * 2.5 + FREEZE_MS + 40000, async (t, ser) => {
+      const tics = ser[frozenIndex][ser[frozenIndex].length - 1][1];
+      if (!froze && tics >= 300) {
+        froze = true;
+        before = ms.map((m, i) => ser[i][ser[i].length - 1][1]);
+        console.log('  freezing ' + f.name + ' at tic ' + tics);
+        t0 = now(); tf = t;
+        fp = freeze(f.page, FREEZE_MS).then(() => { t1 = now(); });     // not awaited: the other machines are watched meanwhile
+      }
+    });
+    if (fp) { await fp; }
+    for (const m of ms) { await m.waitEnd(30000); }
+    await checkGame(ms, TICS);
+    check(froze, 'the tab was frozen in the middle of the game (at tic ' + before[frozenIndex] + ')');
+    console.log('  ' + f.name + ' was frozen for ' + ((t1 - t0) / 1000).toFixed(1) + ' s');
+    // the others could not move on without the frozen player's input: they stood still, and then played on
+    const other = ms.findIndex((m, i) => i !== frozenIndex);
+    const at = (ser, ms_) => { let c = 0; for (const [tt, n] of ser) { if (tt <= ms_) { c = n; } } return c; };
+    const adv = at(series[other], tf + (t1 - t0)) - at(series[other], tf);
+    console.log('  ' + ms[other].name + ' moved ' + adv + ' tics in the ' + ((t1 - t0) / 1000).toFixed(1) + ' s the other tab was frozen (nominal ' + (NOMINAL * FREEZE_MS / 1000) + ')');
+    check(adv < 0.5 * NOMINAL * FREEZE_MS / 1000, ms[other].name + ' (not frozen) could not move on without the frozen player: ' + adv + ' tics in ' + FREEZE_MS / 1000 + ' s, not ' + NOMINAL * FREEZE_MS / 1000);
+    check(series[other][series[other].length - 1][1] >= TICS, ms[other].name + ' then played on to tic ' + series[other][series[other].length - 1][1]);
+  } finally { await cleanup(relay); }
+}
+SCENARIOS['frozen-slave'] = {
+  what: 'a browser slave frozen for 5 s mid-game: the room waits and goes on, all agree, the game does not end early',
+  run: () => frozenRoom(['browser', 'browser'], 1),
+};
+SCENARIOS['frozen-host'] = {
+  what: 'a browser host frozen for 5 s mid-game (native slave): the same',
+  run: () => frozenRoom(['browser', 'native'], 0),
+};
+
+// The relay drops a member that was silent for longer than its session timeout (here 3 s; a frozen tab sends no
+// keepalives). The game of that machine must end with the overlay message and status 1 instead of standing still (NetLostCheck).
+SCENARIOS['relay-lost'] = {
+  what: 'the relay drops a frozen tab (session timeout 3 s): that machine ends with status 1 and the relay message on the overlay',
+  run: async () => {
+    const relay = await startRelay(['-session-timeout', '3s', '-keepalive', '1s']);
+    try {
+      const ms = await room(relay, ['browser', 'browser'], { tics: TICS });
+      const f = ms[1];
+      await sample(ms, 300, 90000, async () => {});
+      console.log('  freezing ' + f.name + ' for 6 s at tic ' + Math.floor((await f.dumpSize()) / REC));
+      await freeze(f.page, 6000);
+      const t0 = now();
+      const st = await f.waitEnd(30000);
+      const took = (now() - t0) / 1000, text = await f.status(), code = await f.exitCode();
+      console.log('  ' + f.name + ' ended ' + took.toFixed(1) + ' s after it thawed: ' + text);
+      check(st === 'error' && code === 1, f.name + ' ended with status 1 (' + st + ', ' + code + ')');
+      check(/Network game failed.*relay ended the session/i.test(text), f.name + ': the overlay says why', text);
+      check(took < 15, f.name + ' ended within 15 s of thawing (' + took.toFixed(1) + ')');
+      check(f.errors.length === 0, f.name + ' had no page errors', f.errors.join('; '));
+    } finally { await cleanup(relay); }
+  },
+};
+
+// Desync detection works: -testnudge on one machine makes the sync check log GAME OUT OF SYNC, and the dumps differ from
+// that tic on (the nudge moves that player 8 units at tic NUDGE; its record of tic NUDGE+1 is the first to differ). Every
+// machine compares (code-facts section 2.5): the master each slave's byte against its own, a slave its own against the master's.
+const NUDGE = 300;
+async function nudgeRoom(nudgedIndex) {
+  const relay = await startRelay();
+  try {
+    console.log('  browser + browser, the ' + (nudgedIndex === 0 ? 'master' : 'slave') + ' nudged at tic ' + NUDGE + ' (' + LOAD() + ')');
+    const tics = 700;
+    const ms = await room(relay, ['browser', 'browser'], { tics, nudge: { [nudgedIndex]: String(NUDGE) } });
+    for (const m of ms) { await m.waitEnd(120000); }
+    const dumps = await checkGame(ms, tics, { desyncExpected: true });
+    for (const m of ms) {
+      const out = await m.out();
+      const logged = (out.match(/GAME OUT OF SYNC/g) || []).length;
+      check(logged > 0, m.name + ' logged GAME OUT OF SYNC (' + logged + ' lines): ' + (out.match(/GAME OUT OF SYNC[^\n]*/) || ['(none)'])[0]);
+    }
+    const d = firstDifference(dumps);
+    check(!!d && d.tic >= NUDGE + 1 && d.tic <= NUDGE + 3, 'the dumps first differ at tic ' + (d ? d.tic : 'never') + ' (the nudge was at ' + NUDGE + ')', d ? d.what : '');
+    if (d) {
+      const n = Math.min(dumps[0].length, dumps[1].length) / REC;
+      let differ = 0;
+      for (let i = d.index; i < n; i++) { if (!dumps[0].subarray(i * REC + 8, (i + 1) * REC).equals(dumps[1].subarray(i * REC + 8, (i + 1) * REC))) { differ++; } }
+      check(differ >= 0.95 * (n - d.index), 'and they stay different from there on (' + differ + ' of ' + (n - d.index) + ' records differ in a state hash)');
+    }
+  } finally { await cleanup(relay); }
+}
+SCENARIOS['nudge-slave'] = {
+  what: 'desync detection: -testnudge on the slave: both machines log GAME OUT OF SYNC and the dumps differ from that tic on',
+  run: () => nudgeRoom(1),
+};
+SCENARIOS['nudge-master'] = {
+  what: 'desync detection: -testnudge on the master',
+  run: () => nudgeRoom(0),
+};
+
+// ---- failures end on the page's overlay ----------------------------------------------------------------------
+
+// The page's overlay shows the game's message when a network game cannot start. `args` are the game's arguments.
+async function failCase(label, args, re, opts) {
+  opts = opts || {};
+  const m = await browserMachine('f-' + label, args, { dump: 'd.bin' });
+  const t0 = now();
+  await m.start();
+  const st = await m.waitEnd(opts.limit || 60000);
+  const took = (now() - t0) / 1000;
+  const text = await m.status();
+  const code = await m.exitCode();
+  const visible = await m.page.evaluate(() => !document.getElementById('overlay').hidden && !document.getElementById('reload').hidden);
+  console.log('  ' + label + ': ' + took.toFixed(1) + ' s, status ' + code + ': ' + text.replace(/\s+/g, ' ').slice(0, 200));
+  check(st === 'error' && code === 1, label + ': the game ended with status 1 (' + st + ', ' + code + ')');
+  check(re.test(text), label + ': the page says why (' + re + ')', text);
+  check(visible, label + ': on the page\'s end-of-game overlay with the reload button');
+  check(m.errors.length === 0, label + ': no page errors', m.errors.join('; '));
+  if (opts.under) { check(took < opts.under, label + ': within ' + opts.under + ' s (' + took.toFixed(1) + ')'); }
+  await m.stop();
+  machines.splice(machines.indexOf(m), 1);
+  return took;
+}
+
+SCENARIOS.errors = {
+  what: 'failures end on the page overlay with the game\'s message: relay unreachable, no such room, room full, host gone during the wait, plain -net, a UDP-style -relay',
+  run: async () => {
+    let relay = null;
+    try {
+      // no relay is running on PORT_NONE
+      await failCase('relay-unreachable', gameArgs({ net: ['-relay', 'ws://127.0.0.1:' + PORT_NONE + '/vnet', '-host-room', '2'] }), /Network game failed.*(could not be reached|did not answer)/i, { under: 30 });
+      await failCase('plain-net', gameArgs({ net: ['-nm:2'] }), /needs a relay.*plain -net needs UDP/is, { under: 10 });
+      await failCase('udp-relay-address', gameArgs({ net: ['-relay', '127.0.0.1:' + PORT_UDP, '-host-room', '2'] }), /wants the relay's WebSocket URL/i, { under: 10 });
+      await failCase('bad-code', gameArgs({ net: ['-relay', 'ws://127.0.0.1:' + PORT_HTTP + '/vnet', '-room', 'ABC'] }), /room code is 6 letters/i, { under: 10 });
+      relay = await startRelay(['-max-members', '2']);
+      await failCase('no-such-room', gameArgs({ net: ['-relay', relay.ws, '-room', 'ABCDEF'] }), /Network game failed.*no room with that code/i, { under: 20 });
+
+      // room full: the relay takes 2 members; two players are in (idle in the menu: no level arguments), a third is refused
+      const idle = (net) => gameArgs({ net, level: false, testsync: false });
+      const host = await browserMachine('full-host', idle(['-relay', relay.ws, '-host-room', '2']), { dump: 'd.bin' });
+      await host.start();
+      const code = await waitRoomCode(host);
+      const j1 = await browserMachine('full-p1', idle(['-relay', relay.ws, '-room', code]), { dump: 'd.bin' });
+      await j1.start();
+      const t0 = now();
+      while (!/joined room/.test(await j1.out()) && now() - t0 < 20000) { await sleep(200); }
+      await failCase('room-full', idle(['-relay', relay.ws, '-room', code]), /Network game failed.*room is full/i, { under: 20 });
+      for (const m of [host, j1]) { await m.stop(); machines.splice(machines.indexOf(m), 1); }
+
+      // the host goes away while the game waits for a third player: the joiner gives up 10 s after the host's last answer
+      // (this relay's rooms hold 2, so -host-room 3 would be clamped to 2 and the game would start: use one with room for 4)
+      await relay.stop();
+      relay = await startRelay(['-max-members', '4']);
+      const h3 = await browserMachine('gone-host', idle(['-relay', relay.ws, '-host-room', '3']), { dump: 'd.bin' });
+      await h3.start();
+      const code3 = await waitRoomCode(h3);
+      const g3 = await browserMachine('gone-joiner', idle(['-relay', relay.ws, '-room', code3]), { dump: 'd.bin' });
+      await g3.start();
+      const t1 = now();
+      while (!/joined room/.test(await g3.out()) && now() - t1 < 20000) { await sleep(200); }
+      await sleep(3000);       // it has been answered by now
+      const tgone = now();
+      await h3.stop();         // the host's tab closes
+      const st = await g3.waitEnd(40000);
+      const took = (now() - tgone) / 1000, text = await g3.status(), c3 = await g3.exitCode();
+      console.log('  host-gone: the joiner gave up ' + took.toFixed(1) + ' s after the host left: ' + text.replace(/\s+/g, ' ').slice(0, 200));
+      check(st === 'error' && c3 === 1, 'host-gone: the joiner ended with status 1 (' + st + ', ' + c3 + ')');
+      check(/Network game failed.*host stopped answering/i.test(text), 'host-gone: the page says the host stopped answering', text);
+      check(took >= 8 && took <= 25, 'host-gone: after about 10 s (' + took.toFixed(1) + ')');
+    } finally { await cleanup(relay); }
+  },
+};
+
+// The shareware network gate (D14) in the browser: with the default config.js (allowSharewareNetGames false) a network game on the
+// shareware GRP is refused with the game's message on the overlay, and no room is made. The address cannot open the gate: outside
+// test mode ?args= is ignored, and the page passes -allowsharewarenet only when config.js says so.
+SCENARIOS.gate = {
+  what: 'the shareware gate (D14): with the default config.js a browser net game on the shareware GRP is refused on the overlay; the address cannot open it',
+  run: async () => {
+    let relay = null;
+    try {
+      CONFIG_ALLOW = false;
+      relay = await startRelay();
+      const m = await browserMachine('gate', gameArgs({ net: ['-relay', relay.ws, '-host-room', '2'], testsync: false }), { dump: 'd.bin' });
+      await m.start();
+      const st = await m.waitEnd(30000);
+      const text = await m.status(), out = await m.out(), code = await m.exitCode();
+      console.log('  default config: ' + text.replace(/\s+/g, ' ').slice(0, 160));
+      check(st === 'error' && code === 1, 'refused: the game ended with status 1 (' + st + ', ' + code + ')');
+      check(/Network games are switched off for the shareware version/.test(text), 'the overlay says why', text);
+      check(/Network game refused/.test(out), 'and the game log says so');
+      check(!/room code/.test(out), 'no room was made (the gate comes before the relay)');
+      check(await m.page.evaluate(() => window.jfswArgs.indexOf('-allowsharewarenet') < 0), 'the page did not pass -allowsharewarenet');
+      check(!(await m.page.evaluate(() => /allowsharewarenet/i.test(location.search))), 'and nothing in the address asked for it');
+      const stats = await new Promise((resolve) => { require('http').get('http://127.0.0.1:' + PORT_HTTP + '/stats', (r) => { let t = ''; r.on('data', (d) => { t += d; }); r.on('end', () => resolve(t)); }).on('error', () => resolve('')); });
+      check(!/"rooms":\s*[1-9]/.test(stats), 'the relay holds no room (' + stats.slice(0, 80).replace(/\s+/g, ' ') + ')');
+      await m.stop(); machines.splice(machines.indexOf(m), 1);
+      // a visitor's address: no ?test=1 (and testMode false in config.js): ?args= is not read, so -allowsharewarenet cannot come from the address
+      await closeEnv();
+      CONFIG_ALLOW = false; CONFIG_TEST = false;
+      const v = await browserMachine('visitor', [], { raw: '?args=' + encodeURIComponent('-allowsharewarenet -net -relay ' + relay.ws + ' -host-room 2') + '&allowsharewarenet=1&allowSharewareNetGames=true' });
+      await v.start();
+      await sleep(5000);
+      const args = await v.page.evaluate(() => window.jfswArgs);
+      check(Array.isArray(args) && args.length === 0, 'a visitor\'s address with ?args=-allowsharewarenet... starts the game with no arguments (' + JSON.stringify(args) + ')');
+      check(!/room code/.test(await v.out()), 'and no network game starts');
+    } finally { await cleanup(relay); }
+  },
+};
+
+// The test-only relay knobs work only on a ?test=1 page.
+SCENARIOS.knobs = {
+  what: 'relay_wt, relay_cert, impair and wake_every are read from the address only with ?test=1',
+  run: async () => {
+    let relay = null;
+    try {
+      const e = await env();
+      const knobs = '&relay_wt=' + encodeURIComponent('https://127.0.0.1:1/vnet') + '&relay_cert=' + 'ab'.repeat(32) + '&impair=' + encodeURIComponent('loss=50,seed=3') + '&wake_every=7';
+      const read = async (q) => {
+        const ctx = await e.browser.newContext();
+        const page = await ctx.newPage();
+        await page.goto(e.base + q);
+        await L.waitState(page, 'ready', 60000);
+        const r = await page.evaluate(() => ({ knobs: window.jfswKnobs, module: Module.jfswKnobs, wake: Module.jfswWakeEvery, test: typeof window.jfswTest }));
+        await ctx.close();
+        return r;
+      };
+      const off = await read('?args=-v1' + knobs);
+      check(Object.keys(off.knobs).length === 0 && Object.keys(off.module).length === 0 && off.wake === undefined, 'without ?test=1 the page hands the game no knobs (' + JSON.stringify(off.knobs) + ')');
+      check(off.test === 'undefined', 'and has no test hooks');
+      const on = await read('?test=1&persist=0' + knobs);
+      check(on.knobs.relay_wt === 'https://127.0.0.1:1/vnet' && on.knobs.relay_cert === 'ab'.repeat(32) && on.knobs.impair === 'loss=50,seed=3' && on.wake === 7, 'with ?test=1 all four reach the game (' + JSON.stringify(on.knobs) + ', wake every ' + on.wake + ')');
+      // and the game acts on them: it says so, and a bad impairment spec is refused
+      relay = await startRelay();
+      const m = await browserMachine('knobs', gameArgs({ net: ['-relay', relay.ws, '-host-room', '2'], level: false, testsync: false }), { query: '&impair=' + encodeURIComponent('lat=5,seed=9') + '&relay_cert=' + relay.cert + '&relay_wt=' + encodeURIComponent(relay.wt), dump: 'd.bin' });
+      await m.start();
+      await waitRoomCode(m);
+      const out = await m.out();
+      check(/test knobs in use: relay_wt relay_cert impair/.test(out), 'the game reports the knobs it was given');
+      check(/relay-wt/.test(out), 'the WebTransport knobs took effect (' + (await transportOf(m)) + ')');
+      await m.stop(); machines.splice(machines.indexOf(m), 1);
+      const bad = await browserMachine('badknob', gameArgs({ net: ['-relay', relay.ws, '-host-room', '2'], level: false, testsync: false }), { query: '&impair=' + encodeURIComponent('loss=banana'), dump: 'd.bin' });
+      await bad.start();
+      const st = await bad.waitEnd(20000);
+      check(st === 'error' && /not a vnet impairment spec/.test(await bad.status()), 'a malformed impairment spec is refused with a message (' + (await bad.status()).slice(0, 120) + ')');
+    } finally { await cleanup(relay); }
+  },
+};
+
+// One longer game: co-op on E1L2, two players, 4000 tics (about 2 minutes), a browser and a native player through the relay.
+SCENARIOS.long = {
+  what: 'a longer game: two players, co-op on E1L2, 4000 tics, browser host and native slave',
+  run: async () => {
+    const o = { tics: 4000, level: '-v1 -l2 -c2' };
+    const relay = await startRelay();
+    try {
+      console.log('  browser + native, co-op E1L2, ' + o.tics + ' tics (' + LOAD() + ')');
+      const ms = await room(relay, ['browser', 'native'], o);
+      const series = await sample(ms, o.tics, o.tics / NOMINAL * 1000 * 3 + 90000);
+      for (const m of ms) { await m.waitEnd(60000); }
+      console.log('  tic rates between tic 500 and 3500: ' + ms.map((m, i) => m.name + ' ' + rate(series[i], 500, 3500).toFixed(1)).join(', ') + ' (nominal ' + NOMINAL + '); ' + LOAD());
+      await checkGame(ms, o.tics);
+    } finally { await cleanup(relay); }
+  },
+};
+
 async function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('--list')) { for (const k of Object.keys(SCENARIOS)) { console.log(k.padEnd(14) + SCENARIOS[k].what); } return 0; }
