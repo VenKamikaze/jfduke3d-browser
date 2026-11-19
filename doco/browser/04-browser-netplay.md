@@ -102,4 +102,64 @@ Playwright cannot hide a tab: the tests imitate one as jfSW's do (`document.hidd
 
 ## Outcome
 
-(Written when the work is done.)
+## Outcome
+
+Status: **review** (branch `browser/04-browser-netplay` in jfduke3d-browser; fix branch `fix/level-exit-stale-inputs` from `master`). **No fork change**: jfbuild stays at `5950d14`, jfaudiolib and jfmact are untouched, so jfSW's `make test` was not affected and was not run. Nothing was merged, no pull request was opened, `claude` and `master` were not touched. Not tested: a person playing, a tab that is really hidden (Playwright cannot hide one: the imitation is as jfSW's), Firefox and Safari, WebTransport against a real certificate, a registered GRP, Windows or macOS.
+
+@@SHAS@@
+
+**What landed**
+
+- *Reused unchanged from jfSW (the jfbuild fork at `5950d14`):* the vnet-backed `mmulti.c` in the wasm build, the vnet wake callback and `jfbuild_browser_wake()`, the hidden yield in `showframe()` and `handleevents()` (a `MessageChannel` message, never `setTimeout`), `mmulti_vnet_flush()`, the test knobs (`?relay_wt=`, `?relay_cert=`, `?impair=`, test mode only). The browser already played network games after 02; 04 shows it.
+- *The hidden pass* (`src/netgame.c` `HiddenNetPass()`, 15 lines in `app_main`'s loop): in a hidden tab with a relay session the loop skips `cheats()`, `nonsharedkeys()`, `displayrooms()`, `displayrest()`, `checksync()` and `nextpage()` and runs `faketimerhandler()` for every input that is due (at most 8), `checksync()` (the sync ring has 256 entries), and `mmulti_vnet_flush()`. Design and what differs from jfSW: `code-facts.md` section 20.2.
+- *The audit and its instruments* (`src/testhooks.c`): `-testdrawcheck` (the raw bytes of every simulation table before and after `displayrooms()` and `displayrest()`), `-testnodraw` (the hidden pass without a browser), `-testcam<T>,<n>` and `-testmirror<T>,<n>` (every player in front of a security monitor, pressing use, or a mirror, firing the RPG). Verdicts: `code-facts.md` section 20.3.
+- *Tests:* `tests/web/netplay.js` (@@NSCEN@@ scenarios, `--list`), `tests/net/test-nodraw.sh` and two new scenarios of `tests/net/test-level-exit.sh` (both in `make test-net`), `make test-web` runs `netplay.js`.
+- *Page:* `?wake_every=N` (test only), and the harmless rejection when a WebTransport session is closed at the game's exit is not reported as a page error (jfSW's 06b; found by the `wt` scenario).
+- *Docs:* `code-facts.md` section 20, `bugs.md` D17, D18 (new) and D11 (reproduced, fixed), `building.md`, this Outcome, the README row. `PROMPT.md` is not edited.
+
+@@RESULTS@@
+
+@@MUTATIONS@@
+
+**Decisions** (taken without the coordinator, the most conservative option each time)
+
+1. **No fork change.** Everything engine-side was already in the jfbuild fork at the pin (jfSW's 04 to 06b), so no branch of a fork, no pointer move, no run of jfSW's `make test`.
+2. **`HiddenNetPass()` is in `src/netgame.c`** (a new file of ours, Q5), `app_main` has 15 lines. It runs after `moveloop()` in the loop, not before it as jfSW's runs `MoveLoop()` after `faketimerhandler()`: the loop is cyclic and the measured rate is nominal either way.
+3. **The pass calls `checksync()`** (jfSW has no such thing): Duke's sync bytes are a ring of 256 entries compared only from the drawing half of the loop; a tab that never compared would report false differences when shown again. The test counts the sync bytes a hidden tab compares (1,498 of 1,500 tics; the mutation without it fails).
+4. **The pass keeps its own flush** (04b generalises it to every tab).
+5. **`-testnodraw`**: the hidden pass is also reachable natively, so the audit is tested in the fast native suite as well as with browsers (`test-nodraw.sh`, in `make test-net`).
+6. **A monitor's `temp_data[0]` and `owner` are out of the state hash; the game is not changed.** Moving the counter out of `hittype[]` would change upstream code for a hash's sake. The audit shows nothing reads either (`code-facts.md` 20.3); the rest of the monitor, and `ps[].newowner`, stay hashed. Reverting this fails `test-nodraw.sh camera` and `draw-state`.
+7. **No L19.** Nothing in Duke's drawing is read by the simulation, so there is no draw fix (jfSW's 04c needed one). D17 (floor over floor, not in the shareware maps) and D18 (the monitor note) are recorded, not fixed.
+8. **D11 is fixed here** (`fix/level-exit-stale-inputs`, 7 lines): A1 recorded it as a structural hazard that never reproduced and was not planned; the browser test reproduced it (1 desync in 7 games) and a hook (`-testlate`) makes it deterministic. One fix of the allowed three. Peer-to-peer mode (case 17) has the same hazard and is left alone (not tested).
+9. **The version byte of packet 6 has room for the sum of all flags under 122 on shareware data**; the two new simulation hooks take the free low bits (1 and 2), `-testlate` and `-testdrawcheck` change nothing a peer sees and have none.
+10. **Ports 48400 to 48499** for `netplay.js` (jfSW's 48300 range is used by `con.js` here); nominal rate 30 tics a second.
+11. **`make test-web` runs `netplay.js`** (about 45 minutes); the test pages are served a `config.js` with `allowSharewareNetGames: true` and never the default; the default is shown refused by `gate`.
+12. **The "yields entered with data held back" check is counted from the hide to tic 1,450**, not over the whole run: the hide itself and `-testquit`'s 1.5 s linger loop (which sends and waits) are test artefacts (13 of 1,539 over the whole run, 0 of 240 between).
+13. **Also in the page:** the harmless "The session is closed." rejection at the end of a WebTransport game is ignored as in jfSW 06b (found by the `wt` scenario; not in 02's page).
+14. **`level-exit` stalls machines on purpose** (A1's `-teststall`, one game for D6 with a stalled slave and one for D5 with a stalled master and late joiner datagrams), so the browser games bite on the two A1 fixes as well.
+
+
+**Play-test steps (Arch Linux)**
+
+```
+sudo pacman -S --needed base-devel git unzip python nodejs npm go sdl2 libvorbis libogg mesa glu alsa-lib gtk3
+git clone --recurse-submodules -b browser/04-browser-netplay https://github.com/VenKamikaze/jfduke3d-browser
+cd jfduke3d-browser
+scripts/setup-emsdk.sh && scripts/build-wasm.sh      # about 3 minutes the first time
+scripts/fetch-test-data.sh && make -j4               # the shareware data, and the native ./duke3d
+cp testdata/duke3dshare.grp build-wasm/
+printf "window.JFSW_CONFIG={testMode:true,relay:'',allowSharewareNetGames:true,data:{url:'duke3dshare.grp',size:11035779,crc32:'983ad923',revalidate:false}};\n" > build-wasm/config.js   # a LAN: the shareware gate open (D14), test mode on
+(cd ext/vnet/relay && go build -o /tmp/vnet-relay ./cmd/vnet-relay)
+/tmp/vnet-relay -udp 127.0.0.1:7777 -http 127.0.0.1:7778 -origins 127.0.0.1:8000 -v      # terminal 1
+(cd build-wasm && python3 -m http.server 8000 --bind 127.0.0.1)                          # terminal 2
+```
+
+Host from a browser: open `http://127.0.0.1:8000/?test=1&args=-net%20-relay%20ws://127.0.0.1:7778/vnet%20-host-room%202%20--%20-v1%20-l1%20-c2`, click "Click to start" and read the room code from the DevTools console (`mmulti: room code ABC234 ...`). Join natively: `./duke3d -allowsharewarenet -net -relay 127.0.0.1:7777 -room ABC234 -- -v1 -l1 -c2`, or from a second browser window with `-room ABC234` in place of `-host-room 2`. The other way round: host natively (`-host-room 2`), join from the page.
+
+Things only a person can check:
+- **A tab that is really hidden.** With a native host and a browser guest playing, switch to another tab for a minute, then five minutes (Chrome's intensive throttling), and back. The native game must never wait more than a moment, and the guest's picture must be current when you return. Then host from the browser, hide that tab, and watch the native guest keep playing. (The wake callback does not use timers, so the throttling should not matter; only a real browser can say.)
+- **A security monitor and a mirror with real hands.** E1L1: the monitors are in the rooms east of the start (the Tab map shows them); press Space in front of one, in a game with a second player whose tab is in the background; E1L1's two mirrors are in the bathrooms (shoot one with the RPG). Both screens must show the same game, and `OUT OF SYNC` must never appear in the log or on the host's console.
+- **A level exit with a poor connection:** E1L1 to the exit switch with 100 to 200 ms of latency on one player (`sudo tc qdisc add dev lo root netem delay 60ms`; remove with `tc qdisc del dev lo root`): the game must stay in sync into E1L2 (D11).
+- **The tests on your own machine:** `npm i playwright && npx playwright install chromium`, then `node tests/web/netplay.js --list` and `node tests/web/netplay.js ws hidden-slave draw-state` (about 5 minutes); `tests/net/test-nodraw.sh` and `tests/net/test-level-exit.sh` natively.
+
+
