@@ -16,18 +16,21 @@ static int TestExitTic;         // -testexit<T>; 0 = off
 static int TestFireOn, TestFireFrom;
 static int TestArmOn;           // -testarm
 static int TestLevelNo;         // the number of the level being played: 1 for the first, counted at its tic 1
+static int TestCamTic, TestCamNum, TestMirrorTic, TestMirrorNum;     // -testcam<T>,<n>, -testmirror<T>,<n> (brief 04)
+int TestNoDrawOn;               // -testnodraw (brief 04)
 
 void TestSyncArg(void)         { TestSyncOn = 1; }
 void TestQuitArg(int tics)     { TestQuitTics = tics; }
 void TestNudgeArg(int tic)     { TestNudgeTic = tic; }
 
-// Added to the version byte of packet 6: -testsync changes what is on the wire; -testexit, -testfire and -testarm
-// change the simulation (every player must have them, or the game desyncs), so players that differ are refused.
+// Added to the version byte of packet 6: -testsync changes what is on the wire; -testexit, -testfire, -testarm,
+// -testcam and -testmirror change the simulation (every player must have them, or the game desyncs), so players that
+// differ are refused. (The byte is 134 on shareware data and the sum of all of them must stay under 122.)
 // (jfSW also adds the quit tic; there a mismatch is only a log line, here a mismatch ends the game with a message,
 // and a different -testquit is harmless to the game.)
 int TestVersionSalt(void)
 {
-    return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0) + (TestArmOn ? 64 : 0);
+    return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0) + (TestArmOn ? 64 : 0) + (TestCamTic > 0 ? 1 : 0) + (TestMirrorTic > 0 ? 2 : 0);
 }
 
 int TestSyncTic(int index)
@@ -463,7 +466,14 @@ void TestInputHook(void)
 {
     int n;
 
-    // the input being made is fifo index movefifoend[myconnectindex], which game tic movefifoend + 1 of this level runs
+    // -testcam / -testmirror: the monitor's use key, the mirror's RPG (the input being made is for game tic movefifoend + 1)
+    n = movefifoend[myconnectindex] + 1;
+    if (TestLevelNo <= 1) {
+        if (TestCamTic > 0 && n >= TestCamTic + 2 && n < TestCamTic + 6)
+            loc.bits |= 1 << 29;
+        if (TestMirrorTic > 0 && n >= TestMirrorTic + 60)
+            loc.bits = (loc.bits & ~(15 << 8)) | (5 << 8) | (1 << 2);       // weapon 5 (the RPG), fire
+    }
     if (!TestFireOn || (TestLevelNo <= 1 && movefifoend[myconnectindex] + 1 < TestFireFrom))
         return;
     loc.bits = (loc.bits & ~(15 << 8)) | (4 << 8) | (1 << 2);      // weapon 4 (the chaingun), fire
@@ -590,6 +600,261 @@ void TestPredictEnd(void)
     }
 }
 
+// ---- -testdrawcheck, -testnodraw, -testcam, -testmirror (brief 04: the drawing-state audit) --------------
+//
+// Drawing must not leave anything behind that the simulation reads: a hidden browser tab draws nothing (brief 04's
+// hidden pass), a visible one does, and both must play the same game. code-facts.md section 20 is the audit; these
+// are its instruments. All test-only and inert without their argument.
+//
+// -testdrawcheck   compares the raw bytes of every table of the simulation (ps[], sprite[], hittype[], sector[], wall[],
+//                  ud, the sprite lists) just before and just after displayrooms() and again around displayrest() (game.c):
+//                  whatever drawing writes that lasts is logged once per field ("TEST: draw check: ...") and counted
+//                  (the line -testquit prints). The ambient sound sprites' hittype is left out (the audio thread writes
+//                  it at any moment, as for -testpredict).
+// -testnodraw      this machine plays as a hidden browser tab does: no picture, the inputs made and the moves run by
+//                  HiddenNetPass() (netgame.c); natively it spins. In a network game only.
+// -testcam<T>,<n>  at game tic T of the first level every machine puts every player in front of the n-th security
+//                  monitor (VIEWSCREEN) of the level, facing it, and from tic T+2 for four tics every player's own
+//                  input presses the use key: the monitor switches to its camera, which is what makes the drawing code
+//                  run animatecamsprite() (sector.c) on a machine that draws. Idle afterwards.
+// -testmirror<T>,<n>  the same in front of the n-th mirror (mirrorwall[n]), facing it, and from tic T+60 on every player's
+//                  own input fires the RPG (the only weapon that breaks a mirror, sector.c checkhitwall()).
+// Both change the simulation (every player must be given them: the version byte), at the same tic on every machine.
+
+static int TestDrawCheckOn;
+static unsigned char *DcSnap[8];
+static size_t DcSize[8];
+static const char *DcNames[8] = { "ps", "sprite", "hittype", "sector", "wall", "ud", "lists", "scalars" };
+static int DcFrames, DcChangedFrames, DcFields;
+struct dcfield { int table, offset; int count; int first_index; unsigned char before[4], after[4]; const char *where; int level, tic; };
+static struct dcfield DcSeen[400];
+
+void TestDrawCheckArg(void) { TestDrawCheckOn = 1; }
+void TestNoDrawArg(void) { TestNoDrawOn = 1; }
+void TestCamArg(const char *arg)
+{
+    TestCamTic = atoi(arg);
+    if (strchr(arg, ',')) TestCamNum = atoi(strchr(arg, ',') + 1);
+}
+void TestMirrorArg(const char *arg)
+{
+    TestMirrorTic = atoi(arg);
+    if (strchr(arg, ',')) TestMirrorNum = atoi(strchr(arg, ',') + 1);
+}
+
+// the lists and scalars, packed into one buffer so that they compare like the tables
+static size_t DcPack(unsigned char *out)
+{
+    size_t n = 0;
+    int sc[8];
+#define CP(a) do { if (out) memcpy(out + n, a, sizeof(a)); n += sizeof(a); } while (0)
+    CP(headspritesect); CP(prevspritesect); CP(nextspritesect);
+    CP(headspritestat); CP(prevspritestat); CP(nextspritestat);
+    CP(spriteq); CP(frags); CP(po);
+#undef CP
+    sc[0] = randomseed; sc[1] = global_random; sc[2] = numplayers; sc[3] = movefifoplc;
+    sc[4] = numsectors; sc[5] = numwalls; sc[6] = spriteqloc; sc[7] = animatecnt;
+    if (out) memcpy(out + n, sc, sizeof(sc));
+    n += sizeof(sc);
+    return n;
+}
+
+static void DcTake(void)
+{
+    static size_t listsize;
+    int i;
+
+    if (!DcSnap[0]) {
+        DcSize[0] = sizeof(ps); DcSize[1] = sizeof(sprite); DcSize[2] = sizeof(hittype);
+        DcSize[3] = sizeof(sector); DcSize[4] = sizeof(wall); DcSize[5] = sizeof(ud);
+        listsize = DcPack(NULL);
+        DcSize[6] = listsize;
+        DcSize[7] = 0;
+        for (i = 0; i < 7; i++) DcSnap[i] = (unsigned char *)malloc(DcSize[i]);
+    }
+    memcpy(DcSnap[0], ps, sizeof(ps));
+    memcpy(DcSnap[1], sprite, sizeof(sprite));
+    memcpy(DcSnap[2], hittype, sizeof(hittype));
+    memcpy(DcSnap[3], sector, sizeof(sector));
+    memcpy(DcSnap[4], wall, sizeof(wall));
+    memcpy(DcSnap[5], &ud, sizeof(ud));
+    DcPack(DcSnap[6]);
+}
+
+void TestDrawBegin(void)
+{
+    if (TestDrawCheckOn) DcTake();
+}
+
+void TestDrawEnd(const char *where)
+{
+    const void *now[7];
+    size_t unit[7];
+    int t, i, changed = 0;
+    unsigned char *lists;
+
+    if (!TestDrawCheckOn || !DcSnap[0]) return;
+    lists = (unsigned char *)malloc(DcSize[6]);
+    DcPack(lists);
+    now[0] = ps; now[1] = sprite; now[2] = hittype; now[3] = sector; now[4] = wall; now[5] = &ud; now[6] = lists;
+    unit[0] = sizeof(ps[0]); unit[1] = sizeof(sprite[0]); unit[2] = sizeof(hittype[0]); unit[3] = sizeof(sector[0]);
+    unit[4] = sizeof(wall[0]); unit[5] = sizeof(ud); unit[6] = DcSize[6];
+    DcFrames++;
+    for (t = 0; t < 7; t++) {
+        const unsigned char *a = DcSnap[t], *b = (const unsigned char *)now[t];
+        size_t n = DcSize[t], k;
+        if (t == 3) n = numsectors * sizeof(sector[0]);
+        if (t == 4) n = numwalls * sizeof(wall[0]);
+        if (!memcmp(a, b, n)) continue;
+        for (k = 0; k < n; k++) {
+            int idx, off, f;
+            if (a[k] == b[k]) continue;
+            idx = (int)(k / unit[t]); off = (int)(k % unit[t]);
+            // not the ambient sound sprites' hittype (the audio thread writes it)
+            if (t == 2 && sprite[idx].statnum == 11 && sprite[idx].picnum == MUSICANDSFX) continue;
+            // a field is a run of changed bytes in one object, 4 bytes wide at most: count it once
+            off &= ~3;
+            for (f = 0; f < DcFields; f++)
+                if (DcSeen[f].table == t && DcSeen[f].offset == off && !strcmp(DcSeen[f].where, where)) break;
+            if (f == DcFields) {
+                if (DcFields >= (int)(sizeof(DcSeen) / sizeof(DcSeen[0]))) continue;
+                memset(&DcSeen[f], 0, sizeof(DcSeen[f]));
+                DcSeen[f].table = t; DcSeen[f].offset = off; DcSeen[f].where = where; DcSeen[f].first_index = idx;
+                DcSeen[f].level = ud.level_number; DcSeen[f].tic = movefifoplc;
+                for (i = 0; i < 4 && (size_t)off + i < unit[t]; i++) {
+                    DcSeen[f].before[i] = a[idx * unit[t] + off + i]; DcSeen[f].after[i] = b[idx * unit[t] + off + i];
+                }
+                DcFields++;
+                buildprintf("TEST: draw check: %s writes %s[%d] at byte %d: %02x%02x%02x%02x -> %02x%02x%02x%02x (tic %d)\n", where, DcNames[t], idx, off,
+                    DcSeen[f].before[0], DcSeen[f].before[1], DcSeen[f].before[2], DcSeen[f].before[3],
+                    DcSeen[f].after[0], DcSeen[f].after[1], DcSeen[f].after[2], DcSeen[f].after[3], movefifoplc);
+            }
+            DcSeen[f].count++;
+            changed = 1;
+            // the rest of this field's bytes
+            k = (k | 3);
+            if (k >= n) break;
+        }
+    }
+    if (changed) DcChangedFrames++;
+    free(lists);
+}
+
+// Where the n-th target is, from the level's own tables, and where to stand and look: ang is the way the player faces.
+// A security monitor is a wall sprite: it faces along its angle, and the player stands in front of it. A mirror is a wall
+// (mirrorwall[n]) of a thin sector between the room and the hidden sector that holds the reflection (mirrorsector[n]):
+// the player stands in the room, on the side of the wall that is not the reflection's.
+static int TestFindMonitor(int n, int *x, int *y, short *sect, short *ang)
+{
+    int i, k = 0, d, nx, ny, px, py, pass, sgn;
+    static const int dists[4] = { 512, 768, 384, 1024 };
+    short sc, a;
+
+    for (i = headspritestat[6]; i >= 0; i = nextspritestat[i])
+        if (sprite[i].picnum == VIEWSCREEN || sprite[i].picnum == VIEWSCREEN2)
+            if (k++ == n) break;
+    if (i < 0) return -1;
+    // in front of the screen (along its angle), in its own sector if possible, else in any
+    for (pass = 0; pass < 2; pass++)
+        for (sgn = 0; sgn < 2; sgn++) {
+            a = (sprite[i].ang + (sgn ? 1024 : 0)) & 2047;
+            nx = sintable[(a + 512) & 2047]; ny = sintable[a & 2047];
+            for (d = 0; d < 4; d++) {
+                px = sprite[i].x + mulscale14(nx, dists[d]); py = sprite[i].y + mulscale14(ny, dists[d]);
+                sc = sprite[i].sectnum;
+                updatesector(px, py, &sc);
+                if (sc >= 0 && (pass == 1 || sc == sprite[i].sectnum)) {
+                    *x = px; *y = py; *sect = sc; *ang = (a + 1024) & 2047;
+                    return i;
+                }
+            }
+        }
+    return -2;
+}
+
+static int TestFindMirror(int n, int *x, int *y, short *sect, short *ang)
+{
+    int w, sgn, d, px, py, mx, my, dx, dy;
+    static const int dists[7] = { 1024, 768, 512, 1536, 384, 256, 192 };
+    short sc, a, ws;
+
+    if (n < 0 || n >= mirrorcnt) return -1;
+    w = mirrorwall[n];
+    // the wall's own sector: the one whose wall range holds it
+    for (ws = 0; ws < numsectors; ws++)
+        if (w >= sector[ws].wallptr && w < sector[ws].wallptr + sector[ws].wallnum) break;
+    if (ws >= numsectors) return -1;
+    dx = wall[wall[w].point2].x - wall[w].x; dy = wall[wall[w].point2].y - wall[w].y;
+    mx = wall[w].x + dx / 2; my = wall[w].y + dy / 2;
+    a = getangle(dx, dy);
+    for (sgn = 0; sgn < 2; sgn++) {
+        short na = (a + (sgn ? 512 : 1536)) & 2047;       // the two normals
+        for (d = 0; d < 7; d++) {
+            px = mx + mulscale14(sintable[(na + 512) & 2047], dists[d]); py = my + mulscale14(sintable[na & 2047], dists[d]);
+            sc = ws;
+            updatesector(px, py, &sc);
+            if (sc >= 0 && sc != mirrorsector[n]) { *x = px; *y = py; *sect = sc; *ang = (na + 1024) & 2047; return w; }
+        }
+    }
+    return -2;
+}
+
+static void TestGoPlace(int kind, int n)
+{
+    int i, x = 0, y = 0, cz, fz, target;
+    short sect = 0, ang = 0;
+
+    target = kind == 0 ? TestFindMonitor(n, &x, &y, &sect, &ang) : TestFindMirror(n, &x, &y, &sect, &ang);
+    if (target < 0) {
+        buildprintf("TEST: go: there is no %s %d to stand in front of (%d)\n", kind == 0 ? "monitor" : "mirror", n, target);
+        return;
+    }
+    for (i = connecthead; i >= 0; i = connectpoint2[i]) {
+        struct player_struct *p = &ps[i];
+        getzsofslope(sect, x, y, &cz, &fz);
+        p->posx = p->oposx = p->bobposx = x; p->posy = p->oposy = p->bobposy = y;
+        p->posz = p->oposz = fz - PHEIGHT;
+        p->truefz = fz; p->truecz = cz;
+        p->posxv = p->posyv = p->poszv = 0;
+        p->ang = p->oang = ang; p->horiz = p->ohoriz = 100; p->look_ang = 0;
+        p->cursectnum = sect;
+        sprite[p->i].x = x; sprite[p->i].y = y; sprite[p->i].z = p->posz + PHEIGHT;
+        sprite[p->i].ang = ang;
+        changespritesect(p->i, sect);
+        hittype[p->i].floorz = fz; hittype[p->i].ceilingz = cz;
+        p->on_ground = 1; p->jumping_counter = 0;
+        if (kind == 1) {        // the RPG, with its ammunition (a game started with -v1 -l1 gives co-op players none)
+            p->gotweapon[RPG_WEAPON] = 1;
+            p->ammo_amount[RPG_WEAPON] = max_ammo_amount[RPG_WEAPON];
+        }
+        // (each machine sets the same, at the same tic: the simulation's next tic starts from here)
+    }
+    buildprintf("TEST: go: players placed at %d,%d in sector %d facing %d, %s %d (%s %d at %d,%d)\n", x, y, sect, ang,
+        kind == 0 ? "monitor" : "mirror wall", target, kind == 0 ? "sprite" : "n", n,
+        kind == 0 ? sprite[target].x : wall[target].x, kind == 0 ? sprite[target].y : wall[target].y);
+}
+
+// Called from domovethings() at every tic: the placement, and (tic T+12) what came of it.
+static void TestGoTic(int tic)
+{
+    int i, k;
+
+    if (TestLevelNo > 1) return;
+    if (TestCamTic > 0 && tic == TestCamTic) TestGoPlace(0, TestCamNum);
+    if (TestMirrorTic > 0 && tic == TestMirrorTic) TestGoPlace(1, TestMirrorNum);
+    if (TestCamTic > 0 && tic == TestCamTic + 12) {
+        for (i = headspritestat[6], k = 0; i >= 0; i = nextspritestat[i])
+            if (sprite[i].picnum == VIEWSCREEN || sprite[i].picnum == VIEWSCREEN2) {
+                if (k++ == TestCamNum) {
+                    buildprintf("TEST: go: monitor sprite %d: yvel %d (1 = switched to its camera), camsprite %d, T1 %d\n", i, sprite[i].yvel, camsprite, hittype[i].temp_data[0]);
+                    break;
+                }
+            }
+    }
+    if (TestMirrorTic > 0 && tic == TestMirrorTic + 260 && TestMirrorNum >= 0 && TestMirrorNum < mirrorcnt)
+        buildprintf("TEST: go: mirror wall %d: overpicnum %d (%d = intact), picnum %d\n", mirrorwall[TestMirrorNum], wall[mirrorwall[TestMirrorNum]].overpicnum, MIRROR, wall[mirrorwall[TestMirrorNum]].picnum);
+}
+
 // ---- The hooks in domovethings() ---------------------------------------------------------------
 
 void TestTicHook(void)
@@ -640,6 +905,7 @@ void TestTicHook(void)
         buildprintf("TEST: nudging player %d at tic %d\n", myconnectindex, TestNudgeTic);
         ps[myconnectindex].posx += 8;
     }
+    TestGoTic(tic);
     if (TestDumpName[0]) {
         TestStateTic(tic);
         TestDumpTic(tic);
@@ -655,6 +921,8 @@ static void TestQuitFinish(void)
         myconnectindex, numplayers);
     if (TestPredictOn)
         buildprintf("TEST: prediction: %d predicted moves checked, %d changed the simulation\n", PredictChecked, PredictChanged);
+    if (TestDrawCheckOn)
+        buildprintf("TEST: draw check: %d frames checked, %d of them changed the simulation's tables, %d fields in all\n", DcFrames, DcChangedFrames, DcFields);
     if (TestDumpFile) fflush(TestDumpFile);
 
     // a player that is a few tics behind still needs what we send: keep acknowledging and

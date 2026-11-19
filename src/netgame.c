@@ -107,8 +107,13 @@ void NetSyncDiffers(int index, int player)
 
 // ---- A hidden browser tab (brief 04) -----------------------------------------------------------
 
+int NetHiddenTab(void)
+{
 #ifdef __EMSCRIPTEN__
-#include "mmulti_vnet.h"
+    if (jfbuild_browser_hidden_netgame()) return 1;
+#endif
+    return TestNoDrawOn && numplayers > 1;
+}
 
 // One pass of the game loop of a hidden browser tab in a network game, called by app_main's loop
 // after moveloop() (which has received and moved every tic whose inputs are in) in place of
@@ -137,4 +142,3 @@ void HiddenNetPass(void)
     checksync();
     mmulti_vnet_flush();
 }
-#endif
