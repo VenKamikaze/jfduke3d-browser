@@ -816,11 +816,18 @@ void getpackets(void)
     // function, the same inputs and the same order of tics as faketimerhandler() sends; the bytes that
     // depend on when the master sends follow its timing, as they always did: the lag-correction bytes of
     // every TIMERUPDATESIZ-th tic (each slave's myminlag so far) and which of the master's pending sync
-    // bytes go in which packet. The condition is faketimerhandler()'s own: a master that is allowed to
-    // send (ready2send is 0 from the end of a level until the next one has started: D5, D6, D11), and
-    // sendmasterpackets() sends a tic only when every player's input for it is here, including the
-    // master's, so a barrier after clearfifo() (an empty queue of its own) sends nothing, and a batch
-    // of movesperpacket tics always goes whole.
+    // bytes go in which packet. The conditions: a master that is allowed to send, as in
+    // faketimerhandler() (ready2send is 0 from the start of the program until the first level has
+    // started, and from the end of a level until the next one has: D5, D6, D11), and **not inside
+    // waitforeverybody()** (inbarrier). Before 04b nothing was forwarded in a barrier. ready2send is
+    // still 1 in newgame()'s first barrier (a new game from the menu or a packet 5 or 8 in the middle
+    // of a game) and in saveplayer()'s, and the master's own queue is full there: a slave's inputs
+    // of the running game that are still on their way would be forwarded after the master's ready
+    // packet, and a packet 0 has no tic number and no waitingfornewlevel guard (only packet 1 has), so
+    // one that reaches a slave after it has cleared its queues would be taken for a tic of the new level
+    // (found by reading in 04b's review; -testnewgame at 700 ms makes the master hang and the slave crash).
+    // Otherwise sendmasterpackets() sends a tic only when every player's input for it is here, the
+    // master's included, and a batch of movesperpacket tics always goes whole.
     if (networkmode == 0 && myconnectindex == connecthead && ready2send && !inbarrier)
         sendmasterpackets(0x7fffffff);
 }
