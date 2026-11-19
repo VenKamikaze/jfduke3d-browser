@@ -131,6 +131,7 @@ function gameArgs(o) {
   // o.state: true (the state at tics 1 and 2 of the level) or a list of more tics (-teststate<T>)
   if (o.dump) { a.push('-testdump' + o.dump); a.push(...(o.state ? ['-teststate'].concat(Array.isArray(o.state) ? o.state.map((t) => '-teststate' + t) : []) : STATE_ARGS)); }
   if (o.nudge) { a.push('-testnudge' + o.nudge); }
+  if (o.lag) { a.push('-testlag' + o.lag); }
   return a.concat(o.extra || []);
 }
 
@@ -290,6 +291,7 @@ function parseState(text) {
       cur = new Map();
       blocks.set(w[0] + ' L' + (lv ? lv[1] : '?'), cur);
       cur.set('header', new Map([['randomseed', (/randomseed=(-?\d+)/.exec(line) || [])[1]]]));
+      cur.frames = +((/frames=(-?\d+)/.exec(line) || [])[1]);     // frames drawn since the level started (differs per machine: not compared)
       continue;
     }
     if (!cur) { continue; }
@@ -432,7 +434,7 @@ async function room(relay, kinds, o) {
     const net = (kind) => (kind === 'browser'
       ? ['-relay', relay.ws].concat(i === 0 ? ['-host-room', String(kinds.length)] : ['-room', code])
       : ['-relay', relay.udp].concat(i === 0 ? ['-host-room', String(kinds.length)] : ['-room', code]));
-    const args = gameArgs({ net: net(kinds[i]), tics, dump: 'd.bin', nudge: o.nudge && o.nudge[i], level: o.level, state: o.state, extra: o.extra ? o.extra(i) : [] });
+    const args = gameArgs({ net: net(kinds[i]), tics, dump: 'd.bin', nudge: o.nudge && o.nudge[i], level: o.level, state: o.state, lag: o.lag ? 'l.bin' : '', extra: o.extra ? o.extra(i) : [] });
     const impair = o.impair ? o.impair(i) : null;
     let m;
     if (kinds[i] === 'browser') {
@@ -1057,6 +1059,200 @@ SCENARIOS.knobs = {
       const st = await bad.waitEnd(20000);
       check(st === 'error' && /not a vnet impairment spec/.test(await bad.status()), 'a malformed impairment spec is refused with a message (' + (await bad.status()).slice(0, 120) + ')');
     } finally { await cleanup(relay); }
+  },
+};
+
+// ---- input-to-tic delay (brief 04b) ------------------------------------------------------------------
+// Every machine also runs -testlag<file> (testhooks.c): 36 bytes a game tic, nine little endian 32 bit fields, one machine's own
+// clock (microseconds): tic, made (this machine's own input for the tic), ready (every player's input is here), ran (the tic
+// ran), sendwait (sendpacket() to the datagram leaving), fwdwait (master: ready to the combined packet being queued),
+// otherminlag, bufferjitter, the sum of the totalclock corrections. The delay a player feels is ran - made.
+const LREC = 36, LNONE = 0xFFFFFFFF;
+function parseLag(buf) {
+  const rows = [];
+  for (let i = 0; i + LREC <= buf.length; i += LREC) {
+    rows.push({ tic: buf.readUInt32LE(i), made: buf.readUInt32LE(i + 4), ready: buf.readUInt32LE(i + 8), ran: buf.readUInt32LE(i + 12),
+      sendwait: buf.readUInt32LE(i + 16), fwdwait: buf.readUInt32LE(i + 20), minlag: buf.readInt32LE(i + 24), jitter: buf.readInt32LE(i + 28), corr: buf.readInt32LE(i + 32) });
+  }
+  return rows;
+}
+function mean(a) { return a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN; }
+function pct(a, p) {
+  if (!a.length) { return NaN; }
+  const b = a.slice().sort((x, y) => x - y);
+  return b[Math.min(b.length - 1, Math.floor(p / 100 * b.length))];
+}
+// median and 95th percentile (ms) of the delays, from tic `from` on
+function lagStats(rows, from) {
+  const r = rows.filter((x) => x.tic >= from);
+  const ms = (f) => r.map(f).filter((v) => v >= 0 && v < 5e6).map((v) => v / 1000);
+  const col = (name, f) => { const a = ms(f); return { name, n: a.length, med: pct(a, 50), p95: pct(a, 95), mean: mean(a) }; };
+  const sw = r.filter((x) => x.sendwait !== LNONE).map((x) => x.sendwait / 1000);
+  const fw = r.filter((x) => x.fwdwait !== LNONE).map((x) => x.fwdwait / 1000);
+  const last = rows[rows.length - 1] || { corr: 0 };
+  const lags = r.map((x) => x.minlag), jit = r.map((x) => x.jitter);
+  return {
+    total: col('input to tic', (x) => x.ran - x.made),
+    toReady: col('input to complete', (x) => x.ready - x.made),
+    wait: col('complete to tic', (x) => x.ran - x.ready),
+    sendwait: { n: sw.length, med: pct(sw, 50), p95: pct(sw, 95), mean: mean(sw) },
+    fwdwait: { n: fw.length, med: pct(fw, 50), p95: pct(fw, 95), mean: mean(fw) },
+    minlag: { med: pct(lags, 50), min: Math.min(...lags), max: Math.max(...lags) },
+    jitter: { med: pct(jit, 50), min: Math.min(...jit), max: Math.max(...jit) },
+    corrections: rows.length ? last.corr : 0,
+    // the clock corrections made after tic `from`, in clock ticks (a game tic is 4)
+    corrLate: rows.length ? last.corr - (rows.find((x) => x.tic >= from) || last).corr : 0,
+    // how many times the clock was corrected after tic `from`, and how often the direction reversed (an oscillation reverses every time)
+    corrEvents: r.filter((x, i) => i > 0 && x.corr !== r[i - 1].corr).length,
+    corrReversals: (() => { let n = 0, d = 0; for (let i = 1; i < r.length; i++) { const c = Math.sign(r[i].corr - r[i - 1].corr); if (c && d && c !== d) { n++; } if (c) { d = c; } } return n; })(),
+  };
+}
+const f1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : 'n/a');
+// "TEST: lag: 1234 datagrams (56789 bytes) to player 1 in 30000 ms" lines -> datagrams a second to each peer
+function datagramRates(out) {
+  const r = [];
+  const re = /TEST: lag: (\d+) datagrams \((\d+) bytes\) to player (\d+) in (\d+) ms(?:: (\d+) with new data, (\d+) paced \(acks and resends only\), (\d+) of those)?/g;
+  let m;
+  while ((m = re.exec(out))) {
+    r.push({ to: +m[3], n: +m[1], bytes: +m[2], perSec: +m[1] / Math.max(1, +m[4]) * 1000, bytesPerSec: +m[2] / Math.max(1, +m[4]) * 1000,
+      newData: m[5] === undefined ? NaN : +m[5], paced: m[6] === undefined ? NaN : +m[6], redundant: m[7] === undefined ? NaN : +m[7] });
+  }
+  return r;
+}
+
+// One measured game: `kinds` as for room(); o.impair(i) as there. Returns { ms, stats: per machine, rates: per machine }.
+async function lagGame(label, kinds, o) {
+  o = o || {};
+  const relay = await startRelay();
+  try {
+    console.log('  ' + label + ': ' + kinds.join(' + ') + (o.impair ? ', impaired' : '') + (o.extra ? ', ' + o.extra(0).join(' ') : '') + ' (' + LOAD() + ')');
+    const tics = o.tics || TICS;
+    const ms = await room(relay, kinds, Object.assign({}, o, { lag: true, tics }));
+    const limit = tics / NOMINAL * 1000 * 3 + 90000;
+    for (const m of ms) { await m.waitEnd(limit - (now() - ms[0].started)); }
+    const load = LOAD();
+    await checkGame(ms, tics);
+    const stats = [], rates = [];
+    for (let i = 0; i < ms.length; i++) {
+      const buf = await ms[i].readFile('l.bin');
+      check(!!buf && buf.length >= LREC * tics, ms[i].name + ' wrote its lag record (' + (buf ? buf.length / LREC : 0) + ' tics)');
+      const st = lagStats(buf ? parseLag(buf) : [], 200);
+      stats.push(st);
+      rates.push(datagramRates(await ms[i].out()));
+      const role = i === 0 ? 'master' : 'slave ' + i;
+      console.log('    ' + ms[i].name + ' (' + ms[i].kind + ' ' + role + '): input to tic ' + f1(st.total.med) + ' ms median, ' + f1(st.total.p95) + ' p95, ' + f1(st.total.mean) + ' mean'
+        + '; own input to tic complete ' + f1(st.toReady.med) + ' / ' + f1(st.toReady.p95) + '; complete to tic ' + f1(st.wait.med) + ' / ' + f1(st.wait.p95)
+        + '; sendpacket to datagram ' + f1(st.sendwait.med) + ' / ' + f1(st.sendwait.p95) + (i === 0 ? '; last input to combined packet ' + f1(st.fwdwait.med) + ' / ' + f1(st.fwdwait.p95) + ' (mean ' + f1(st.fwdwait.mean) + ')' : '')
+        + '; otherminlag ' + st.minlag.med + ' (' + st.minlag.min + '..' + st.minlag.max + '), bufferjitter ' + st.jitter.med + ' (' + st.jitter.min + '..' + st.jitter.max + ')'
+        + '; clock corrections after tic 200: ' + st.corrLate + ' clock ticks (' + st.corrections + ' in all)');
+      console.log('    ' + ms[i].name + ' datagrams: ' + rates[i].map((r) => r.perSec.toFixed(1) + '/s to player ' + r.to + ' (' + r.bytesPerSec.toFixed(0) + ' B/s'
+        + (Number.isFinite(r.paced) ? '; of ' + r.n + ': ' + r.newData + ' with new data, ' + r.paced + ' acks/resends only, ' + r.redundant + ' of those just before one with new data' : '') + ')').join(', '));
+    }
+    console.log('    ' + load);
+    return { ms, stats, rates, load };
+  } finally { await cleanup(relay); }
+}
+const LAT30 = (i) => 'lat=30,seed=' + (201 + i);       // 30 ms on everything a machine sends: 30 ms each way
+
+SCENARIOS['lag-matrix'] = {
+  manual: true,         // a report (about 7 minutes); run it by name. The checked version is the 'lag' scenario.
+  what: 'input-to-tic delay of master and slave: browsers, browser and native, native and native; unimpaired and with 30 ms each way (a report; agreement is checked; only by name)',
+  run: async () => {
+    // NETPLAY_LAG_ONLY=browsers,natives-30ms picks games; NETPLAY_LAG_REPS=3 repeats each (the numbers move with the machine's load);
+    // NETPLAY_LAG_EXTRA='-f2' adds game arguments to every machine (movesperpacket 2); NETPLAY_LAG_TAG labels the LAGSUM lines
+    const only = (process.env.NETPLAY_LAG_ONLY || '').split(',').filter(Boolean), reps = +process.env.NETPLAY_LAG_REPS || 1;
+    const extra = (process.env.NETPLAY_LAG_EXTRA || '').split(/\s+/).filter(Boolean), tag = process.env.NETPLAY_LAG_TAG || '-';
+    for (let r = 0; r < reps; r++) {
+      for (const [name, kinds] of [['browsers', ['browser', 'browser']], ['browser-host', ['browser', 'native']], ['native-host', ['native', 'browser']], ['natives', ['native', 'native']]]) {
+        for (const [label, o] of [[name, {}], [name + '-30ms', { impair: LAT30 }]]) {
+          if (only.length && !only.includes(label)) { continue; }
+          const g = await lagGame(label, kinds, Object.assign({ extra: () => extra }, o));
+          g.stats.forEach((st, i) => console.log('LAGSUM ' + tag + ' ' + label + ' ' + (i === 0 ? 'master' : 'slave') + ' ' + f1(st.total.med) + ' ' + f1(st.total.p95) + ' ' + f1(st.sendwait.med) + ' ' + f1(st.fwdwait.med) + ' ' + f1(st.fwdwait.p95) + ' ' + g.rates[i].map((x) => x.perSec.toFixed(1)).join(',') + ' mean ' + f1(st.total.mean) + ' fwdmean ' + f1(st.fwdwait.mean) + ' ' + g.load));
+        }
+      }
+    }
+  },
+};
+
+// Tic 1 (brief 04b). jfSW's two games differed at tic 1 when one machine ran it after a single drawn frame and another after more
+// (its drawing code keeps scratch values in two fields of the ceiling/floor override markers); 04's audit found no such write in
+// Duke, and this scenario checks that. Every game has the uneven start for certain: the master gets -testslowstart (it waits
+// before its first frame with its clock running; the slave's first input is already there, so that frame makes the master's due
+// inputs, forwards tic 0, and the master runs tic 1 straight after it, while the slave draws frames waiting for it). A slow slave
+// would not do: its tic 1 needs a round trip to the master after its first frame. Every game must agree record for record and
+// field for field (-teststate dumps at tics 1 to 3), and in every game the master must have run tic 1 after exactly one frame
+// and the slave after more.
+const SLOW_START_MS = 3000;     // longer than a browser slave takes to write its first state dump
+SCENARIOS.tic1 = {
+  what: 'a master that drew one frame before tic 1 (-testslowstart) and a slave that drew many agree, record for record and field by field',
+  run: async () => {
+    const tics = 60;
+    let uneven = 0, games = 0;
+    const slow = 0;
+    for (const kinds of [['browser', 'native'], ['browser', 'browser'], ['native', 'browser'], ['native', 'native']]) {
+      for (let g = 0; g < 2; g++) {
+        const relay = await startRelay();
+        try {
+          console.log('  ' + kinds.join(' + ') + ', game ' + (g + 1) + ': the master starts ' + SLOW_START_MS + ' ms late (' + LOAD() + ')');
+          const ms = await room(relay, kinds, { tics, state: [3], extra: (i) => (i === slow && !process.env.NETPLAY_NOSLOW ? ['-testslowstart' + SLOW_START_MS] : []) });
+          for (const m of ms) { await m.waitEnd(90000 - (now() - ms[0].started)); }
+          await checkGame(ms, tics);
+          const st = [];
+          for (const m of ms) { const b = await m.readFile('d.bin.state'); st.push(b ? parseState(b.toString()) : null); }
+          check(st.every(Boolean), 'every machine wrote its state dump');
+          if (!st.every(Boolean)) { continue; }
+          const frames = st.map((a) => a.get('t1 L1').frames);
+          games++;
+          const ok = frames[slow] === 1 && frames[1 - slow] > 1;
+          if (ok) { uneven++; }
+          check(ok, 'p' + slow + ' (slow start) ran tic 1 after one frame and p' + (1 - slow) + ' after more (frames drawn before tic 1: ' + frames.join(', ') + ')');
+          for (let k = 1; k < ms.length; k++) {
+            for (const when of ['t1 L1', 't2 L1', 't3 L1']) {
+              const d = stateDifferences(st[0], st[k], when);
+              check(d.length === 0, ms[0].name + ' and ' + ms[k].name + ' agree field by field at ' + when, d.slice(0, 10).join('; '));
+            }
+          }
+        } finally { await cleanup(relay); }
+      }
+    }
+    check(games === 8 && uneven === games, 'every game had the uneven start (' + uneven + ' of ' + games + ')');
+  },
+};
+
+// The checked measurement (brief 04b): three games, each with every machine's -testlag record. The bounds are on the mechanisms
+// the brief changed, which do not move with the container's load: how long this machine's input (or the master's combined packet)
+// waits in mmulti between sendpacket() and a datagram leaving (step 2: it was the 25 ms PAKRATE window), and how long the master
+// holds a complete tic before it hands the combined packet to mmulti (step 3: it waited for the master's next own input, up to a
+// tic). The delay a player feels (input made to tic run) is checked only where it is steady: two native games with 30 ms each way;
+// in browser games it moves too much with the load to be a fair bound and is reported. The datagram rate per peer must stay
+// within twice the old ceiling (one datagram per peer per 25 ms, 40 a second).
+const LAG = { sendwait: 5, fwdP95: 8, fwdMed: 2, nativeSlave30: 85, rate: 80 };
+function lagChecks(label, g, o) {
+  g.stats.forEach((st, i) => {
+    const who = label + ' ' + g.ms[i].name + ' (' + g.ms[i].kind + (i === 0 ? ' master' : ' slave') + ')';
+    check(st.sendwait.n > 100 && st.sendwait.med < LAG.sendwait, who + ': its packets wait under ' + LAG.sendwait + ' ms in mmulti at the median (' + f1(st.sendwait.med) + ' ms, p95 ' + f1(st.sendwait.p95) + ', ' + st.sendwait.n + ' tics)');
+    if (i === 0) {
+      check(st.fwdwait.n > 100 && st.fwdwait.p95 < LAG.fwdP95 && st.fwdwait.med < LAG.fwdMed, who + ': a complete tic is forwarded within ' + LAG.fwdMed + ' ms at the median and ' + LAG.fwdP95 + ' ms at p95 (' + f1(st.fwdwait.med) + ' / ' + f1(st.fwdwait.p95) + ' ms, mean ' + f1(st.fwdwait.mean) + ')');
+    }
+    for (const r of g.rates[i]) { check(r.perSec <= LAG.rate, who + ': at most ' + LAG.rate + ' datagrams a second to player ' + r.to + ' (' + r.perSec.toFixed(1) + ')'); }
+    check(g.rates[i].length === (i === 0 ? g.ms.length - 1 : 1), who + ' reported its datagram count');
+    check(st.corrEvents <= 10 && st.corrReversals <= 2, who + ': the lag correction does not oscillate (after tic 200: ' + st.corrEvents + ' clock corrections, at most 10, '
+      + st.corrReversals + ' reversals, at most 2; ' + st.corrLate + ' clock ticks in all; otherminlag ' + st.minlag.med + ' (' + st.minlag.min + '..' + st.minlag.max + '), bufferjitter ' + st.jitter.med + ')');
+  });
+  if (o && o.slaveBound) {
+    const st = g.stats[1];
+    check(st.total.med < o.slaveBound, label + ' slave: input to tic under ' + o.slaveBound + ' ms at the median (' + f1(st.total.med) + ' ms, p95 ' + f1(st.total.p95) + ', ' + g.load + ')');
+  }
+}
+SCENARIOS.lag = {
+  what: 'input-to-tic delay (brief 04b): inputs leave when made, the master forwards a complete tic at once, datagram rate bounded, all agree',
+  run: async () => {
+    let g = await lagGame('browsers', ['browser', 'browser'], {});
+    lagChecks('browsers', g);
+    g = await lagGame('native-host', ['native', 'browser'], {});
+    lagChecks('native-host', g);
+    g = await lagGame('natives-30ms', ['native', 'native'], { impair: LAT30 });
+    lagChecks('natives-30ms', g, { slaveBound: LAG.nativeSlave30 });
   },
 };
 

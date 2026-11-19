@@ -458,6 +458,7 @@ void getpackets(void)
     if( !(ps[myconnectindex].gm&MODE_GAME) ) { OSD_DispatchQueued(); }
 
     if (numplayers < 2) return;
+    if (TestLagOn) TestLagPassStart();      // test-only: -testlag
     while ((packbufleng = getpacket(&other,packbuf)) > 0)
     {
         switch(packbuf[0])
@@ -788,6 +789,7 @@ void getpackets(void)
                 gameexit(" ");
                 break;
         }
+        if (TestLagOn) TestLagScan();       // test-only: -testlag
     }
 }
 
@@ -820,6 +822,7 @@ void faketimerhandler()
      {
           copybufbyte(&inputfifo[(movefifoend[myconnectindex]-1)&(MOVEFIFOSIZ-1)][myconnectindex],
                           &inputfifo[movefifoend[myconnectindex]&(MOVEFIFOSIZ-1)][myconnectindex],sizeof(input));
+          if (TestLagOn) TestLagMade(movefifoend[myconnectindex], 1);   // test-only: -testlag
           movefifoend[myconnectindex]++;
           return;
      }
@@ -830,6 +833,7 @@ void faketimerhandler()
      nsyn[0].horz = avghorz/movesperpacket;
      nsyn[0].bits = avgbits;
      avgfvel = avgsvel = avgavel = avghorz = avgbits = 0;
+     if (TestLagOn) TestLagMade(movefifoend[myconnectindex], 0);   // test-only: -testlag
      movefifoend[myconnectindex]++;
 
      if (numplayers < 2)
@@ -877,6 +881,7 @@ void faketimerhandler()
                 else i = 0;
 
                 totalclock -= TICSPERFRAME*i;
+                if (TestLagOn) TestLagCorrect(-TICSPERFRAME*i);     // test-only: -testlag
                 myminlag[connecthead] -= i; otherminlag += i;
             }
 
@@ -927,9 +932,11 @@ void faketimerhandler()
             syncvaltail++;
         }
 
+        if (TestLagOn) TestLagTag(movefifoend[myconnectindex]-1);   // test-only: -testlag
         for(i=connecthead;i>=0;i=connectpoint2[i])
             if (i != myconnectindex)
                 sendpacket(i,packbuf,j);
+        if (TestLagOn) TestLagTag(-1);
 
         return;
     }
@@ -944,6 +951,7 @@ void faketimerhandler()
             else i = 0;
 
             totalclock -= TICSPERFRAME*i;
+            if (TestLagOn) TestLagCorrect(-TICSPERFRAME*i);     // test-only: -testlag
             myminlag[connecthead] -= i; otherminlag += i;
 
             for(i=connecthead;i>=0;i=connectpoint2[i])
@@ -988,7 +996,9 @@ void faketimerhandler()
             syncvaltail++;
         }
 
+        if (TestLagOn) TestLagTag(movefifoend[myconnectindex]-1);   // test-only: -testlag
         sendpacket(connecthead,packbuf,j);
+        if (TestLagOn) TestLagTag(-1);
         return;
     }
 
@@ -1020,6 +1030,7 @@ void sendmasterpackets(int upto)
         nsyn = (input *)&inputfifo[(movefifosendplc  )&(MOVEFIFOSIZ-1)][0];
 
             //MASTER -> SLAVE packet
+        if (TestLagOn) TestLagForward(movefifosendplc);     // test-only: -testlag
         packbuf[0] = 0; j = 1;
 
             //Fix timers and buffer/jitter value
@@ -1076,6 +1087,7 @@ void sendmasterpackets(int upto)
             syncvaltail++;
         }
 
+        if (TestLagOn) TestLagTag(movefifosendplc);     // test-only: -testlag
         for(i=connectpoint2[connecthead];i>=0;i=connectpoint2[i])
             if (playerquitflag[i])
             {
@@ -1083,6 +1095,7 @@ void sendmasterpackets(int upto)
                  if (nsyn[i].bits&(1<<26))
                     playerquitflag[i] = 0;
             }
+        if (TestLagOn) TestLagTag(-1);
 
         movefifosendplc += movesperpacket;
     }
@@ -7061,6 +7074,12 @@ void checkcommandline(int argc, char const * const *argv)
                 }
                 else if (!Bstrncasecmp(c,"testfire",8)) {
                     TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
+                }
+                else if (!Bstrncasecmp(c,"testlag",7)) {
+                    TestLagArg(c+7);            // test-only: this machine's input-to-tic timing, to a file (04b)
+                }
+                else if (!Bstrncasecmp(c,"testslowstart",13)) {
+                    TestSlowStartArg(atoi(c+13));   // test-only: this machine waits before the first frame of its level (04b)
                 }
                 else if (!Bstrncasecmp(c,"testsave",8)) {
                     TestSaveArg(atoi(c+8));     // test-only: this machine asks for a multiplayer save game at tic T

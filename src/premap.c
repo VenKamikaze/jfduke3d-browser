@@ -27,6 +27,7 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 
 #include "duke3d.h"
 #include "netgame.h"
+#include "testhooks.h"
 
 extern unsigned char pow2char[];
 
@@ -1247,6 +1248,7 @@ void resettimevars(void)
     ototalclock = 0L;
     lockclock = 0L;
     ready2send = 1;
+    TestLevelStarted();     // test-only: -testslowstart
 }
 
 
