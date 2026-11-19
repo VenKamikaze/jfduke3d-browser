@@ -1303,6 +1303,8 @@ async function newGameGame(label, kinds, o) {
     for (const m of ms) { await m.waitEnd(tics / NOMINAL * 1000 * 3 + 120000 - (now() - ms[0].started)); }
     await checkGame(ms, tics, { lastLevelOnly: true });
     check(/TEST: starting a new game after \d+ tics/.test(await ms[o.who || 0].out()), ms[o.who || 0].name + ' started the new game');
+    // the barrier rule itself, observed: no master forwards a tic from inside waitforeverybody() (game.c logs it if one does)
+    for (const m of ms) { check(!/inside a barrier/.test(await m.out()), m.name + ' forwarded no tic inside a barrier'); }
     return ms;
   } finally { await cleanup(relay); }
 }

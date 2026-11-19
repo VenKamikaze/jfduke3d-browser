@@ -825,7 +825,8 @@ void getpackets(void)
     // of the running game that are still on their way would be forwarded after the master's ready
     // packet, and a packet 0 has no tic number and no waitingfornewlevel guard (only packet 1 has), so
     // one that reaches a slave after it has cleared its queues would be taken for a tic of the new level
-    // (found by reading in 04b's review; -testnewgame at 700 ms makes the master hang and the slave crash).
+    // (found by reading in 04b's review; with 700 ms on the slave's datagrams, -testnewgame, and no gate here,
+    // the master hung and the slave crashed).
     // Otherwise sendmasterpackets() sends a tic only when every player's input for it is here, the
     // master's included, and a batch of movesperpacket tics always goes whole.
     if (networkmode == 0 && myconnectindex == connecthead && ready2send && !inbarrier)
@@ -1156,6 +1157,7 @@ void sendmasterpackets(int upto)
         movefifosendplc += movesperpacket;
         sent = 1;
         masterfwdsincetick = 1;
+        if (inbarrier) buildprintf("TEST: the master forwarded tic %d inside a barrier (04b: it must not)\n", movefifosendplc);
     }
     if (sent) SendInputNow();
 }
