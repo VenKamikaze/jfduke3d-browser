@@ -7060,6 +7060,9 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"testfire",8)) {
                     TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
                 }
+                else if (!Bstrncasecmp(c,"testsave",8)) {
+                    TestSaveArg(atoi(c+8));     // test-only: this machine asks for a multiplayer save game at tic T
+                }
                 else if (!Bstrncasecmp(c,"testlate",8)) {
                     TestLateArg(c+8);           // test-only: this machine holds back its input of tic T for a while before it sends it
                 }

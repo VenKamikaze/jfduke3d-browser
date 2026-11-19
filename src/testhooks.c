@@ -448,6 +448,7 @@ static void TestDumpTic(int tic)
 static int TestExitDone;
 static int TestStallTic, TestStallMs, TestStallDone;
 static int TestLateTic, TestLateMs, TestLateDone;      // -testlate<T>,<ms> (brief 04)
+static int TestSaveTic, TestSaveDone;                  // -testsave<T> (brief 04 fix round)
 
 void TestExitArg(int tic)  { TestExitTic = tic; }
 void TestFireArg(int tic)  { TestFireOn = 1; TestFireFrom = tic; }
@@ -495,6 +496,8 @@ static void TestStall(void)
     TestWait(TestStallMs);
 }
 
+void TestSaveArg(int tic) { TestSaveTic = tic; }
+
 void TestLateArg(const char *arg)
 {
     const char *c = strchr(arg, ',');
@@ -506,6 +509,15 @@ void TestLateArg(const char *arg)
 void TestInputHook(void)
 {
     int n;
+
+    // -testsave: this machine asks for a multiplayer save game (slot 0) in the input for tic T, as the save menu does
+    // (getinput() builds the same bits from multiflag, player.c); every machine saves in that tic
+    if (TestSaveTic > 0 && !TestSaveDone && TestLevelNo <= 1 && movefifoend[myconnectindex] + 1 == TestSaveTic) {
+        TestSaveDone = 1;
+        buildprintf("TEST: asking for a multiplayer save in the input of tic %d\n", TestSaveTic);
+        loc.bits = (1 << 17) | (1 << 18);
+        loc.fvel = loc.svel = loc.avel = loc.horz = 0;
+    }
 
     // -testlate: the input for tic T is made, and held back for a while before it is sent (the caller sends it when this returns)
     n = movefifoend[myconnectindex] + 1;

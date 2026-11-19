@@ -33,6 +33,9 @@
 //                      before it sends it, and so sends it and the inputs after it late (a slave whose inputs for the
 //                      tics after a level's last tic reach the master after it has left the level: bugs.md D11). Per
 //                      machine; changes nothing in the simulation.
+//   -testsave<T>       (04) this machine asks for a multiplayer save game (slot 0) in its input for game tic T of the first
+//                      level, as the save menu does; every machine saves in that tic. Per machine (the others get the
+//                      request on the wire), nothing in the simulation.
 //   -testmenu          (D3) "TEST: menu N" is printed whenever the menu of a game opens, changes or closes.
 //   -testpredict       (A1) every call of fakedomovethings() (the prediction of the local player's moves) is
 //                      checked: the raw bytes of every table of the simulation are hashed before and after
@@ -71,6 +74,7 @@ void TestFireArg(int tic);
 void TestArmArg(void);          // -testarm: every weapon with full ammo, and full health, in every tic (D15's demos); in the version byte
 void TestPredictArg(void);
 void TestMenuArg(void);
+void TestSaveArg(int tic);
 void TestLateArg(const char *arg);      // "<T>,<ms>"
 void TestDrawCheckArg(void);
 void TestNoDrawArg(void);
