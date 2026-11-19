@@ -111,8 +111,13 @@ function parseState(buf) {
   let cur = null;
   for (const line of buf.toString('latin1').split('\n')) {
     const m = /^t(\d+) randomseed=/.exec(line);
-    if (m) { cur = snaps[+m[1]] = { player: null, actors: 0, sprites: 0 }; continue; }
+    if (m) { cur = snaps[+m[1]] = { player: null, actors: 0, sprites: 0, actorList: {} }; continue; }
     if (!cur) { continue; }
+    if (line.startsWith('sprite ')) {
+      const f = Object.fromEntries(line.split(' ').slice(2).map((x) => { const k = x.indexOf('='); return [x.slice(0, k), +x.slice(k + 1)]; }));
+      const idx = +line.split(' ')[1];
+      if (f.statnum === 1) { cur.actorList[idx] = { extra: f.extra, picnum: f.picnum }; }
+    }
     if (line.startsWith('player 0 ')) { cur.player = Object.fromEntries(line.split(' ').slice(2).map((x) => { const i = x.indexOf('='); return [x.slice(0, i), +x.slice(i + 1)]; })); }
     else if (line.startsWith('sprite ')) { cur.sprites++; if (/ statnum=1 /.test(line + ' ')) { cur.actors++; } }
   }
@@ -132,10 +137,21 @@ function activity(playback, dump) {
     hurt = Math.max(hurt, first.player.last_extra - p.last_extra);
     minActors = Math.min(minActors, snaps[k].actors);
   }
+  // Actors (statnum 1: monsters, but also barrels and the like) that took damage by a later snapshot: their health (`extra`) is lower than
+  // at the first one, they changed picture (a death or pain frame) or they are gone. -testarm refills the player's health in every tic, so
+  // the player's own health says nothing; what the monsters took does.
+  const hitActors = new Set();
+  for (const k of tics.slice(1)) {
+    for (const [i, a] of Object.entries(first.actorList)) {
+      const b = snaps[k].actorList[i];
+      if (!b || b.extra < a.extra || b.picnum !== a.picnum) { hitActors.add(i); }
+    }
+  }
+  const damaged = hitActors.size;
   const rs = records(dump);
   return {
     snapshots: tics, moved, ammoSpent: Math.max(0, ammo(first.player) - minAmmo), hurt,
-    killed: Math.max(0, first.actors - minActors), actorsAtStart: first.actors,
+    killed: Math.max(0, first.actors - minActors), actorsAtStart: first.actors, damaged,
     sectorStates: new Set(rs.map((r) => r[5])).size, tics: rs.length,
   };
 }
@@ -199,11 +215,11 @@ async function main() {
 
     // --- 3. the scripted player did something -------------------------------------------------------------------------
     const act = activity(A, A.dump);
-    console.log(`  activity over ${act.tics} tics (state at tics ${act.snapshots.join(', ')}): moved ${act.moved} units, spent ${act.ammoSpent} rounds, health lost ${act.hurt}, ${act.killed} of ${act.actorsAtStart} monsters gone, ${act.sectorStates} different sector states`);
+    console.log(`  activity over ${act.tics} tics (state at tics ${act.snapshots.join(', ')}): moved ${act.moved} units, spent ${act.ammoSpent} rounds, health lost ${act.hurt}, ${act.damaged} of ${act.actorsAtStart} actors hit or changed, ${act.killed} gone, ${act.sectorStates} different sector states`);
     t.check(act.tics >= 1500, `the dumps cover ${act.tics} game tics`);
     t.check(act.moved >= 1000, 'the scripted player walked around', String(act.moved));
     t.check(act.ammoSpent >= 3, 'the scripted player fired', String(act.ammoSpent));
-    t.check(act.hurt >= 1 || act.killed >= 1, 'monsters took part: the player was hurt or something was killed', `hurt ${act.hurt}, killed ${act.killed}`);
+    t.check(act.damaged >= 1 || act.hurt >= 1, 'monsters took part: an actor took damage or died (the player was hurt)', `damaged actors ${act.damaged}, killed ${act.killed}, player hurt ${act.hurt}`);
     t.check(act.sectorStates >= 10, 'sectors moved (doors, lifts, lights)', String(act.sectorStates));
 
     // --- 4. the comparisons --------------------------------------------------------------------------------------------
@@ -214,7 +230,7 @@ async function main() {
     t.check(dCW === null, `WASM AGAINST CLANG-NATIVE: the same ${quit} game tics, record for record (first difference: ${describe(dCW)})`);
     const dAC = C.dump ? firstDiff(A.dump, C.dump) : null;
     console.log(`  first difference, gcc native against clang native: ${describe(dAC)}; gcc native against wasm: ${describe(dAW)}`);
-      t.check(dAW === null, `GCC NATIVE AGAINST WASM: the same ${quit} game tics, record for record (D15: the order in which the compilers evaluate a call's arguments; first difference: ${describe(dAW)})`);
+    t.check(dAW === null, `GCC NATIVE AGAINST WASM: the same ${quit} game tics, record for record (D15: the order in which the compilers evaluate a call's arguments; first difference: ${describe(dAW)})`);
 
     // --- 5. the comparison fails when the wasm build differs ------------------------------------------------------------
     // A wasm game that differs by one player nudged 8 units at one tic (-testnudge, the hook brief 01 made for this), compared with
