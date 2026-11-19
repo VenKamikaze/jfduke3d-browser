@@ -17,9 +17,15 @@
 #                  tic, the slaves a different number: different ammo carried into the next level and
 #                  "GAME OUT OF SYNC" there (D5, jfSW's L20)
 #
+#   late-slave     (brief 04, bugs.md D11) a slave makes its input for tic 201, the first after the exit, and then stops for
+#                  1.5 s before it sends it: its inputs for the tics after the level's last one reach the master after the
+#                  master has left the level and cleared its queues. Unfixed, the master appends them to the new level's
+#                  queue as the inputs of its first tics (inputs carry no tic number), and the slave plays its own fresh
+#                  inputs there: the slave's player is somewhere else on the master and the other slave than on the slave
+#
 #   tests/net/test-level-exit.sh [--game FILE] [--runs N] [--only NAME]
-#       names: relay-slave, relay-master, relay-3, udp-slave, udp-master, udp-3
-#       (--only may be given several times; the default is all six)
+#       names: relay-slave, relay-master, relay-3, udp-slave, udp-master, udp-3, relay-late, udp-late
+#       (--only may be given several times; the default is the first six; the two late ones are in the default too since brief 04)
 #
 # Passes when, in every run of a scenario: every game exits 0 (a hang is killed after 60 s: exit 124);
 # every machine logs that the level was ended at tic 200 and left after tic 200, and the stalled one logs
@@ -42,7 +48,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 t_need_data
-[ ${#only[@]} -eq 0 ] && only=(relay-slave relay-master relay-3 udp-slave udp-master udp-3)
+[ ${#only[@]} -eq 0 ] && only=(relay-slave relay-master relay-3 udp-slave udp-master udp-3 relay-late udp-late)
 
 exit_tic=200; stall_tic=190; tics=300; limit=60
 rport=$((port_base + 100)); uport=$((port_base + 110))
@@ -64,10 +70,17 @@ run() {
         udp-slave)    mode=udp;   players=2; who=1; impair="" ;;
         udp-master)   mode=udp;   players=2; who=0; impair="" ;;
         udp-3)        mode=udp;   players=3; who=1; impair="" ;;
+        relay-late)   mode=relay; players=3; who=2; impair="" ;;
+        udp-late)     mode=udp;   players=3; who=2; impair="" ;;
     esac
+    late=0; case "$name" in *-late) late=1 ;; esac
     local tag="$name/$run" d="$t_tmp/$name-$run" pids=() n code st more next
-    t_note "$tag: $players players over ${mode}, player $who stops 1.5 s at tic $stall_tic${impair:+, datagrams of the joiners $impair}; the level ends at tic $exit_tic (load $(cut -d' ' -f1-3 /proc/loadavg))"
-    extra() { [ "$1" = "$who" ] && echo "-teststall$stall_tic,1500"; }
+    t_note "$tag: $players players over ${mode}, player $who $([ "$late" = 1 ] && echo "holds its input of tic $((exit_tic + 1)) for 1.5 s" || echo "stops 1.5 s at tic $stall_tic")${impair:+, datagrams of the joiners $impair}; the level ends at tic $exit_tic (load $(cut -d' ' -f1-3 /proc/loadavg))"
+    if [ "$late" = 1 ]; then
+        extra() { [ "$1" = "$who" ] && echo "-testlate$((exit_tic + 1)),1500"; }
+    else
+        extra() { [ "$1" = "$who" ] && echo "-teststall$stall_tic,1500"; }
+    fi
     if [ "$mode" = relay ]; then
         t_game p0 "$d/p0" --game "$game" --timeout "$limit" -- -net -relay "127.0.0.1:$rport" -host-room "$players" -- $common $(extra 0)
         pids+=("$game_pid")
@@ -99,10 +112,14 @@ run() {
         t_check "$tag: player $n played ${played:-?} tics of the first level (want $exit_tic)" test "${played:-0}" -eq "$exit_tic"
         t_check "$tag: player $n logged no desync" bash -c "! grep -q 'OUT OF SYNC' '$log'"
     done
-    t_check "$tag: player $who stalled" grep -q "^TEST: stalling for 1500 ms at tic $stall_tic\$" "$d/p$who/duke3d.log"
-    # (the unfixed game plays those tics after the exit tic: this is what makes the scenario bite)
-    more="$(sed -n 's/^TEST: left the level after tic [0-9]*, with the inputs of \(-\?[0-9]*\) more tics here.*/\1/p' "$d/p0/duke3d.log" | head -1)"
-    t_check "$tag: the master had the inputs of ${more:-?} more tics when it left the first level (at least 2: the case the unfixed game got wrong)" test "${more:-0}" -ge 2
+    if [ "$late" = 1 ]; then
+        t_check "$tag: player $who held its input of tic $((exit_tic + 1))" grep -q "^TEST: holding the input of tic $((exit_tic + 1)) for 1500 ms" "$d/p$who/duke3d.log"
+    else
+        t_check "$tag: player $who stalled" grep -q "^TEST: stalling for 1500 ms at tic $stall_tic\$" "$d/p$who/duke3d.log"
+        # (the unfixed game plays those tics after the exit tic: this is what makes the scenario bite)
+        more="$(sed -n 's/^TEST: left the level after tic [0-9]*, with the inputs of \(-\?[0-9]*\) more tics here.*/\1/p' "$d/p0/duke3d.log" | head -1)"
+        t_check "$tag: the master had the inputs of ${more:-?} more tics when it left the first level (at least 2: the case the unfixed game got wrong)" test "${more:-0}" -ge 2
+    fi
     local size0
     size0="$(stat -c %s "$d/p0/d.bin" 2>/dev/null || echo 0)"
     next="$(od -An -tu4 -j $((exit_tic * 32)) -N4 "$d/p0/d.bin" 2>/dev/null | tr -d ' ')"

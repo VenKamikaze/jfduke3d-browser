@@ -539,6 +539,15 @@ void getpackets(void)
 
                 break;
             case 1:  //[1] (receive slave sync buffer)
+                    // An input that a slave made in the level we have just left (it made it a tic or two ahead
+                    // of the tic it was playing, and sent it late): the slave has not been through the barrier
+                    // of the new level yet (its ready packet, which follows, has not come), and the packet
+                    // carries no tic number, so it would be taken for the slave's input of the new level's
+                    // first tic. Drop it. Only in the barrier that follows clearfifo() (a new level, a loaded game):
+                    // the barriers of a saved game do not clear the queues, and the inputs in flight there are the
+                    // tics after the save.
+                if (waitingfornewlevel && playerreadyflag[other] < playerreadyflag[myconnectindex]) break;
+
                 j = 2; k = packbuf[1];
 
                 osyn = (input *)&inputfifo[(movefifoend[other]-1)&(MOVEFIFOSIZ-1)][0];
@@ -7053,6 +7062,24 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"testfire",8)) {
                     TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
                 }
+                else if (!Bstrncasecmp(c,"testsave",8)) {
+                    TestSaveArg(atoi(c+8));     // test-only: this machine asks for a multiplayer save game at tic T
+                }
+                else if (!Bstrncasecmp(c,"testlate",8)) {
+                    TestLateArg(c+8);           // test-only: this machine holds back its input of tic T for a while before it sends it
+                }
+                else if (!Bstrcasecmp(c,"testdrawcheck")) {
+                    TestDrawCheckArg();         // test-only: what drawing writes to the simulation's tables lasts? (code-facts.md section 20)
+                }
+                else if (!Bstrcasecmp(c,"testnodraw")) {
+                    TestNoDrawArg();            // test-only: this machine draws nothing, as a hidden browser tab does
+                }
+                else if (!Bstrncasecmp(c,"testcam",7)) {
+                    TestCamArg(c+7);            // test-only: every player to a security monitor at tic T, and presses use
+                }
+                else if (!Bstrncasecmp(c,"testmirror",10)) {
+                    TestMirrorArg(c+10);        // test-only: every player to a mirror at tic T, and fires the RPG
+                }
                 else if (!Bstrcasecmp(c,"testarm")) {
                     TestArmArg();               // test-only: every weapon, full ammunition and health in every tic
                 }
@@ -7759,6 +7786,7 @@ int app_main(int argc, char const * const argv[])
     int i, j;
     int configloaded;
     struct grpfile const *gamegrp = NULL;
+    int hiddentab = 0;      // the last pass of the main loop was a hidden tab's (HiddenNetPass)
 
 #ifndef HAVE_STARTWIN
     (void)configloaded;
@@ -8144,6 +8172,7 @@ if (VOLUMEONE) {
     ud.warp_on = 0;
     KB_KeyDown[sc_Pause] = 0;   // JBF: I hate the pause key
 
+    hiddentab = 0;
     while ( !(ps[myconnectindex].gm&MODE_END) ) //The whole loop!!!!!!!!!!!!!!!!!!
     {
         if (handleevents()) {   // JBF
@@ -8211,6 +8240,21 @@ if (!VOLUMEALL) {
             continue;
         }
 
+        // A hidden browser tab in a network game (or -testnodraw): no picture (nobody sees it), and
+        // the inputs and moves are driven by network events (netgame.c, jfbuild/src/sdlayer2.c).
+        // A hidden single player game does not get here: it pauses in the yield.
+        if (NetHiddenTab())
+        {
+            hiddentab = 1;
+            HiddenNetPass();
+            continue;
+        }
+        if (hiddentab)
+        {
+            hiddentab = 0;
+            pub = pus = NUMPAGES;      // the borders were not kept up to date
+        }
+
         cheats();
         nonsharedkeys();
 
@@ -8219,8 +8263,12 @@ if (!VOLUMEALL) {
         else
             i = 65536;
 
+        TestDrawBegin();        // test-only: -testdrawcheck
         displayrooms(screenpeek,i);
+        TestDrawEnd("displayrooms");
+        TestDrawBegin();
         displayrest(i);
+        TestDrawEnd("displayrest");
 
 //        if( KB_KeyPressed(sc_F) )
 //        {

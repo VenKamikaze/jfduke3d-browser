@@ -108,6 +108,7 @@ int movefifoend[MAXPLAYERS];
     //Game recording variables
 
 unsigned char playerreadyflag[MAXPLAYERS],ready2send;
+unsigned char waitingfornewlevel;   // clearfifo() has emptied the input queues and waitforeverybody() has not yet returned
 unsigned char playerquitflag[MAXPLAYERS];
 int vel, svel, angvel, horiz, ototalclock, respawnactortime=768, respawnitemtime=768, groupfile;
 

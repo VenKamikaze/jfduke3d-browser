@@ -28,6 +28,12 @@
 //   ?idb=quota    storing the game data in the cache fails with a QuotaExceededError (test only).
 //   ?stall=<ms>   how long without a byte before a download is called stalled (default 30000; test only).
 //   ?revalidate=1|0  overrides config.js's `revalidate` (test only).
+//   ?wake_every=N   only every Nth vnet wake-up reaches the game (brief 04; test only: imitates a quiet peer).
+//   ?relay_wt=<url>, ?relay_cert=<hex>, ?impair=<spec>   relay test knobs for network games (brief 04; test only): an explicit
+//                 WebTransport URL, the SHA-256 of a relay development certificate (-dev-cert), and a vnet impairment spec
+//                 ("lat=40,jit=10,loss=5,dup=2,reorder=3,seed=7"; every machine its own seed). They go to the game in
+//                 Module.jfswKnobs and are read from the address only on a ?test=1 page: a crafted link must not route a
+//                 visitor through another relay or degrade their connection. window.jfswKnobs shows what was handed over.
 //
 // The game data (brief 03): data.js downloads and checks the GRP, keeps it in its own IndexedDB cache and
 // hands the bytes here; this file writes them to /data/duke3d.grp with a stable modification time (so the game's
@@ -227,8 +233,16 @@
     else { console.warn('page error (not from the game):', describe(e)); }
   });
   window.addEventListener('unhandledrejection', function (e) {
-    if (gameError(e.reason)) { finish('Something went wrong: ' + sentence(describe(e)) + ' Reload the page to try again.', true, true); return; }
+    // (jfSW's brief 06b) closing a WebTransport session (vnet's relay_wt.c, at the game's exit) while the datagram writer still has
+    // writes in flight makes Chromium reject a promise of its own with "The session is closed." Harmless: noted, not reported.
+    // It is checked before gameError(): its stack is the game's (vnet_wt_close is compiled into duke3d.js) and it can arrive
+    // before the game's onExit has run, when gameError() would call it a failure of the game and end the page with an error
+    // message (brief 04: the browser games over WebTransport did, in about two games in three).
     var r = e.reason;
+    var wt = r && (r.name === 'WebTransportError' || (typeof WebTransportError !== 'undefined' && r instanceof WebTransportError));
+    // only the one the page's own closing of the session makes (vnet_wt_close is on its stack), or one that comes after the exit
+    if (wt && (exitedAt > 0 || /vnet_wt_close/.test(r.stack || ''))) { e.preventDefault(); console.info('expected rejection (a closed WebTransport session):', describe(e)); return; }
+    if (gameError(e.reason)) { finish('Something went wrong: ' + sentence(describe(e)) + ' Reload the page to try again.', true, true); return; }
     var lateDom = exitedAt > 0 && typeof DOMException !== 'undefined' && r instanceof DOMException;
     if (lateDom) { e.preventDefault(); console.info('expected rejection (after the game ended):', describe(e)); return; }
     console.warn('unhandled rejection (not from the game):', describe(e));
@@ -668,6 +682,7 @@
     Module.jfswYieldLog = capped([], 50000);
     Module.jfswShowframes = 0;              // pictures the game asked to present (showframe(); none while a hidden tab plays a network game)
     Module.jfswOwedLog = capped([], 50000);     // ms each hidden yield lasted that was entered with data held back by mmulti's send window
+    if (params.get('wake_every')) { Module.jfswWakeEvery = +params.get('wake_every'); }   // only every Nth network wake-up gets through (test only: imitates a quiet peer)
     Module.jfswWakes = 0;                   // how often vnet's wake callback fired (sdlayer2.c)
     Module.jfswHiddenLog = capped([], 50000);   // why each hidden-tab yield ended: 1 a network event, 2 the page became visible, 0 the timer
     window.jfswDownloadLog = [];            // every progress report of the data download

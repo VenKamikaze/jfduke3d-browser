@@ -29,11 +29,27 @@
 //                      (the inputs travel as any other), so the ammo count changes every few tics. It also
 //                      gives every player the starting weapons and 300 chaingun rounds at tic 1, so every
 //                      player must be given it (version byte).
+//   -testlate<T>,<ms>  (04) this machine makes its input for game tic T of the first level, then stops for <ms> ms
+//                      before it sends it, and so sends it and the inputs after it late (a slave whose inputs for the
+//                      tics after a level's last tic reach the master after it has left the level: bugs.md D11). Per
+//                      machine; changes nothing in the simulation.
+//   -testsave<T>       (04) this machine asks for a multiplayer save game (slot 0) in its input for game tic T of the first
+//                      level, as the save menu does; every machine saves in that tic. Per machine (the others get the
+//                      request on the wire), nothing in the simulation.
 //   -testmenu          (D3) "TEST: menu N" is printed whenever the menu of a game opens, changes or closes.
 //   -testpredict       (A1) every call of fakedomovethings() (the prediction of the local player's moves) is
 //                      checked: the raw bytes of every table of the simulation are hashed before and after
 //                      it, and "TEST: prediction ... changed the simulation" is logged for a difference
 //                      (the count is in the line -testquit prints).
+//   -testdrawcheck     (04) the raw bytes of every table of the simulation are compared just before and just after
+//                      displayrooms() and displayrest(); what drawing writes that lasts is logged once per field
+//                      ("TEST: draw check: ...") and counted (the line -testquit prints). code-facts.md section 20.
+//   -testnodraw        (04) this machine plays as a hidden browser tab does: no picture, HiddenNetPass() makes the
+//                      inputs and runs the moves (a network game only). It changes nothing in the simulation.
+//   -testcam<T>,<n>    (04) at game tic T of the first level every machine puts every player in front of the n-th
+//                      security monitor, facing it, and from tic T+2 for four tics every player presses the use key.
+//   -testmirror<T>,<n> (04) the same in front of the n-th mirror, with the RPG fired from tic T+60 on. Both change the
+//                      simulation: every player must be given them (version byte).
 // Everything is off without its argument, and nothing here goes on the wire except -testsync
 // and -testexit (the version byte of packet 6).
 
@@ -58,6 +74,15 @@ void TestFireArg(int tic);
 void TestArmArg(void);          // -testarm: every weapon with full ammo, and full health, in every tic (D15's demos); in the version byte
 void TestPredictArg(void);
 void TestMenuArg(void);
+void TestSaveArg(int tic);
+void TestLateArg(const char *arg);      // "<T>,<ms>"
+void TestDrawCheckArg(void);
+void TestNoDrawArg(void);
+void TestCamArg(const char *arg);       // "<T>,<n>"
+void TestMirrorArg(const char *arg);
+extern int TestNoDrawOn;                // -testnodraw
+void TestDrawBegin(void);               // -testdrawcheck: around displayrooms() and displayrest() (game.c)
+void TestDrawEnd(const char *what);
 void TestPredictBegin(void);    // fakedomovethings(), at its start and its end (-testpredict)
 void TestPredictEnd(void);
 void TestStateArg(int tic);     // -teststate[<T>]: with -testdump, also <name>.state, the state as text (tics 1, 2 and T)
@@ -73,7 +98,7 @@ void TestInputHook(void);
 // after tic T, with the inputs of K more tics here".
 void TestLevelEnd(void);
 
-// Added to the version byte of packet 6: 8 for -testsync, 16 for -testexit, 32 for -testfire, 64 for -testarm
+// Added to the version byte of packet 6: 8 for -testsync, 16 for -testexit, 32 for -testfire, 64 for -testarm, 1 for -testcam, 2 for -testmirror
 // (0 without them), so that machines started with different ones refuse each other.
 int TestVersionSalt(void);
 

@@ -104,3 +104,41 @@ void NetSyncDiffers(int index, int player)
             index, TestSyncTic(index), player);
     syncdiffered = 1;
 }
+
+// ---- A hidden browser tab (brief 04) -----------------------------------------------------------
+
+int NetHiddenTab(void)
+{
+#ifdef __EMSCRIPTEN__
+    if (jfbuild_browser_hidden_netgame()) return 1;
+#endif
+    return TestNoDrawOn && numplayers > 1;
+}
+
+// One pass of the game loop of a hidden browser tab in a network game, called by app_main's loop
+// after moveloop() (which has received and moved every tic whose inputs are in) in place of
+// cheats(), nonsharedkeys(), displayrooms(), displayrest(), checksync() and nextpage(). Nobody
+// sees the picture, so none is made. What drawing would have done for the network is done here:
+//   * Drawing is where the engine calls faketimerhandler() (the "timer interrupt" that makes this
+//     player's input for a tic and sends it; engine.c calls it from inside its long drawing loops,
+//     and the main loop calls it after nextpage(): code-facts.md 2.3). A pass that draws nothing
+//     must call it itself, once for every input that is due by this tab's own clock (a bounded
+//     few: catching up to its clock, never ahead of it), or every other player would wait for
+//     this one's inputs.
+//   * checksync() compares the sync bytes. A hidden tab that never compared would let the ring of
+//     MOVEFIFOSIZ (256) sync bytes wrap and report false differences when it was shown again.
+//     (checksync() draws "Out Of Sync" with printext256() when it must: harmless.)
+//   * mmulti puts at most one datagram per peer on the wire every 25 ms (PAKRATE), and
+//     getpackets(), which faketimerhandler() calls before it makes the input, can spend that
+//     window on an acknowledgement; the input would then wait for the next network event, which
+//     a hidden tab has no frame to replace. The pass ends with a flush (mmulti_vnet_flush()).
+// A hidden single player game does not get here: it pauses in the yield, as in brief 02.
+void HiddenNetPass(void)
+{
+    int n;
+
+    for (n = 0; n < 8 && ready2send && totalclock >= ototalclock + TICSPERFRAME; n++)
+        faketimerhandler();
+    checksync();
+    mmulti_vnet_flush();
+}
