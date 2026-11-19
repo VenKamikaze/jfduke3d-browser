@@ -258,11 +258,15 @@ async function checkGame(ms, tics, opts) {
     check(!!line && +line[1] >= (opts.lastLevelTics || tics), m.name + ' played ' + (line ? line[1] : '?') + ' game tics' + (opts.lastLevelTics ? ' of the last level' : '') + ' (need ' + (opts.lastLevelTics || tics) + ')');
     if (!opts.desyncExpected) {
       check(!/OUT OF SYNC/.test(out), m.name + ' logged no desync');
+      // every machine compares a sync byte every tic (-testsync), a hidden tab included: the count must follow the tics
+      if (line) { check(+line[2] >= 0.9 * +line[1] - 16, m.name + ' compared ' + line[2] + ' sync bytes in ' + line[1] + ' tics (at least 90%: a hidden tab checks too)'); }
     }
     check(!/different versions/.test(out), m.name + ' saw no version mismatch');
     check(m.errors.length === 0, m.name + ' had no page errors', m.errors.join('; '));
     dumps.push(await m.readDump());
   }
+  // NETPLAY_FLIP=1: a negative control for the comparison itself: one byte of the second machine's record 600 is flipped
+  if (process.env.NETPLAY_FLIP && dumps[1] && dumps[1].length > 601 * REC) { dumps[1] = Buffer.from(dumps[1]); dumps[1][600 * REC + 10] ^= 1; }
   if (!opts.desyncExpected) { await compareDumps(ms, dumps, tics); }
   return dumps;
 }
@@ -521,8 +525,10 @@ async function levelExitGame(kinds, hiddenIdx, o) {
   const relay = await startRelay();
   try {
     console.log('  ' + kinds.join(' + ') + (hiddenIdx !== undefined ? ', ' + kinds[hiddenIdx] + ' ' + hiddenIdx + ' hidden from the start' : '') + ' (' + LOAD() + ')');
-    const ms = await room(relay, kinds, { tics: EXIT_TICS, state: true, extra: () => ['-testexit' + EXIT_TIC, '-testfire150'].concat(o.extra || []),
-      query: (i) => (i === hiddenIdx ? '' : '') });
+    // o.stall: { machine index: 'T,ms' } (-teststall: that machine stops for ms at tic T of the first level, ten tics before the exit),
+    // o.impair(i): VNET_IMPAIR / the impair knob of machine i
+    const ms = await room(relay, kinds, { tics: EXIT_TICS, state: true, impair: o.impair,
+      extra: (i) => ['-testexit' + EXIT_TIC, '-testfire150'].concat(o.stall && o.stall[i] ? ['-teststall' + o.stall[i]] : []) });
     let framesAtHide = null;
     if (hiddenIdx !== undefined) {
       const h = ms[hiddenIdx];
@@ -542,6 +548,7 @@ async function levelExitGame(kinds, hiddenIdx, o) {
       const left = /TEST: left the level after tic (\d+)/.exec(out);
       check(!!left && +left[1] === EXIT_TIC, m.name + ' played exactly ' + EXIT_TIC + ' tics of the first level (' + (left ? left[1] : '?') + ')');
     }
+    for (const i of Object.keys(o.stall || {})) { check(/TEST: stalling for 1500 ms at tic 190/.test(await ms[+i].out()), ms[+i].name + ' stopped for 1.5 s at tic 190'); }
     if (dumps.every((d) => d && d.length >= (EXIT_TIC + 1) * REC)) {
       check(dumps.every((d) => d.readUInt32LE(EXIT_TIC * REC) === 1), 'record ' + (EXIT_TIC + 1) + ' of every dump is tic 1 of the next level');
     }
@@ -570,8 +577,11 @@ async function levelExitGame(kinds, hiddenIdx, o) {
   } finally { await cleanup(relay); }
 }
 SCENARIOS['level-exit'] = {
-  what: 'a level exit with browsers (A1\'s -testexit): a browser host, a native and a browser joiner leave E1L1 at tic 200 and play 300 tics of E1L2; dumps and states agree',
-  run: () => levelExitGame(['browser', 'native', 'browser']),
+  what: 'a level exit with browsers (A1\'s -testexit): a browser host, a native and a browser joiner leave E1L1 at tic 200 and play 300 tics of E1L2, a browser slave stopped for 1.5 s at tic 190 (D6), then the browser master stopped with late datagrams (D5); dumps and states agree',
+  run: async () => {
+    await levelExitGame(['browser', 'native', 'browser'], undefined, { stall: { 2: '190,1500' } });
+    await levelExitGame(['browser', 'native', 'browser'], undefined, { stall: { 0: '190,1500' }, impair: (i) => (i > 0 ? 'lat=200,seed=' + (31 + i) : null) });
+  },
 };
 SCENARIOS['hidden-level'] = {
   what: 'a level exit with a browser slave hidden from the start: it draws nothing of either level, every machine agrees through the level change',

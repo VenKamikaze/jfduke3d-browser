@@ -178,6 +178,8 @@ test-web:
 	node tests/web/focus.js
 	node tests/web/menu-keys.js
 	node tests/web/loops.js
+	# netplay.js: browsers and native games in one relay room, the hidden-tab pass, the drawing-state audit (brief 04; about 35 minutes)
+	node tests/web/netplay.js
 	# determinism.js needs the native ./duke3d (make) and builds a clang copy of it (tests/tools/build-native-clang.sh)
 	node tests/web/determinism.js
 	# frametime.js fails in the cloud container (stalls over 100 ms in a software-rendered Chromium): see its header
@@ -275,7 +277,8 @@ test-mmulti: engine-current
 # -testdump the same; a deliberate desync is caught; -testdump in single player and demo playback;
 # plain UDP against the old build; errors; a lost relay session; the shareware network gate;
 # every machine holds every player's announced settings (test-player-announce.sh, D1); every machine plays the
-# same tics of a level and all leave it (test-level-exit.sh, D5 and D6); F4 opens the sound menu and Escape
+# same tics of a level and all leave it (test-level-exit.sh, D5 and D6); a machine that draws nothing plays the same game as
+# machines that draw, over security cameras and a mirror (test-nodraw.sh, brief 04); F4 opens the sound menu and Escape
 # leaves it (test-menu-f4.sh, D3: needs Xvfb, xdotool, ImageMagick and PIL; exit 3 is "NOT RUN", reported
 # and not counted as a failure); the prediction never changes the simulation (test-predict-pure.sh); a
 # player without sound plays the same game (--nosound)
@@ -290,6 +293,7 @@ test-net: engine-current
 	tests/net/test-player-announce.sh
 	tests/net/test-level-exit.sh
 	tests/net/test-predict-pure.sh
+	tests/net/test-nodraw.sh
 	tests/net/test-single.sh
 	@tests/net/test-menu-f4.sh; st=$$?; if [ $$st -eq 3 ]; then echo '*** test-menu-f4.sh: NOT RUN (not counted as passed; see its message above)'; elif [ $$st -ne 0 ]; then exit $$st; fi
 	tests/net/test-udp-unchanged.sh --base-game "$$(tests/net/build-baseline.sh)"
