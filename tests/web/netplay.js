@@ -128,7 +128,8 @@ function gameArgs(o) {
   if (o.level !== false) { a.push(...(o.level || LEVEL).split(' ')); }
   if (o.testsync !== false) { a.push('-testsync'); }
   if (o.tics) { a.push('-testquit' + o.tics); }
-  if (o.dump) { a.push('-testdump' + o.dump); a.push(...(o.state ? ['-teststate'] : STATE_ARGS)); }
+  // o.state: true (the state at tics 1 and 2 of the level) or a list of more tics (-teststate<T>)
+  if (o.dump) { a.push('-testdump' + o.dump); a.push(...(o.state ? ['-teststate'].concat(Array.isArray(o.state) ? o.state.map((t) => '-teststate' + t) : []) : STATE_ARGS)); }
   if (o.nudge) { a.push('-testnudge' + o.nudge); }
   return a.concat(o.extra || []);
 }
@@ -347,6 +348,9 @@ async function compareDumps(ms, dumps, tics) {
   }
   check(!diff, 'all ' + ms.length + ' machines agree on every tic (' + dumps.map((d) => d.length / REC).join(', ') + ' tics each; byte for byte)',
     diff ? 'first difference at tic ' + diff.tic + ' (record ' + diff.index + '): ' + ms[0].name + ' against ' + ms[diff.against].name + ' differ in ' + diff.what + fields : '');
+  if (diff && !process.env.NETPLAY_QUIET) {
+    for (const m of ms) { console.log('    ' + m.name + ' log: ' + (await m.out()).split('\n').filter((l) => /TEST:|OUT OF SYNC|Lobby|left|ready/i.test(l)).slice(0, 14).join(' | ')); }
+  }
 }
 
 // ---- imitating a hidden tab (Bit Riot brief 12, "What the tests did instead of really hiding a tab") ----
@@ -527,9 +531,9 @@ async function levelExitGame(kinds, hiddenIdx, o) {
     console.log('  ' + kinds.join(' + ') + (hiddenIdx !== undefined ? ', ' + kinds[hiddenIdx] + ' ' + hiddenIdx + ' hidden from the start' : '') + ' (' + LOAD() + ')');
     // o.stall: { machine index: 'T,ms' } (-teststall: that machine stops for ms at tic T of the first level, ten tics before the exit),
     // o.impair(i): VNET_IMPAIR / the impair knob of machine i
-    const ms = await room(relay, kinds, { tics: EXIT_TICS, state: true, impair: o.impair,
+    const ms = await room(relay, kinds, { tics: EXIT_TICS, state: [EXIT_TICS], impair: o.impair,
       extra: (i) => ['-testexit' + EXIT_TIC, '-testfire150'].concat(o.stall && o.stall[i] ? ['-teststall' + o.stall[i]] : []) });
-    let framesAtHide = null;
+    let framesAtHide = null, framesL2 = null;
     if (hiddenIdx !== undefined) {
       const h = ms[hiddenIdx];
       // hidden as soon as its game has started and written a few tics
@@ -539,6 +543,19 @@ async function levelExitGame(kinds, hiddenIdx, o) {
       await sleep(300);
       framesAtHide = await h.page.evaluate(() => Module.jfswShowframes);
       console.log('  ' + h.name + ' hidden at tic ' + Math.floor((await h.dumpSize()) / REC));
+    }
+    // a hidden tab: pictures asked for from the hide to the end of the first level, and from tic 15 of the second to its end (the level
+    // change itself draws: premap.c's loading screen, fades and first frame, on every machine)
+    let framesBeforeExit = null;
+    if (hiddenIdx !== undefined) {
+      const h = ms[hiddenIdx];
+      const lim = now() + (EXIT_TIC + EXIT_TICS) / NOMINAL * 1000 * 3 + 90000;
+      while (now() < lim && (await h.state()) === 'running') {
+        const n = Math.floor((await h.dumpSize()) / REC);
+        if (framesBeforeExit === null && n >= EXIT_TIC - 5) { framesBeforeExit = await h.page.evaluate(() => Module.jfswShowframes).catch(() => null); }
+        if (framesL2 === null && n >= EXIT_TIC + 15) { framesL2 = await h.page.evaluate(() => Module.jfswShowframes).catch(() => null); }
+        await sleep(100);
+      }
     }
     for (const m of ms) { await m.waitEnd((EXIT_TIC + EXIT_TICS) / NOMINAL * 1000 * 3 + 90000); }
     const dumps = await checkGame(ms, EXIT_TIC + EXIT_TICS, { lastLevelTics: EXIT_TICS });
@@ -568,8 +585,9 @@ async function levelExitGame(kinds, hiddenIdx, o) {
       const h = ms[hiddenIdx];
       const f = await h.page.evaluate(() => ({ frames: Module.jfswShowframes, passes: Module.jfswHiddenLog.length })).catch(() => null);
       if (f) {
-        console.log('  hidden tab: ' + f.passes + ' hidden passes, ' + (f.frames - framesAtHide) + ' pictures asked for after it was hidden (across both levels)');
-        check(f.frames - framesAtHide < 20, h.name + ' drew nothing of either level while hidden (' + (f.frames - framesAtHide) + ' pictures asked for after hiding)');
+        console.log('  hidden tab: ' + f.passes + ' hidden passes; pictures asked for: ' + (framesBeforeExit - framesAtHide) + ' from the hide to tic ' + (EXIT_TIC - 5) + ', ' + (f.frames - framesL2) + ' from tic 15 of the second level to its end, ' + (framesL2 - framesBeforeExit) + ' in between (the level change: loading screen, fades, first frame)');
+        check(framesBeforeExit !== null && framesBeforeExit - framesAtHide < 5, h.name + ' drew nothing in the first level while hidden (' + (framesBeforeExit - framesAtHide) + ' pictures asked for)');
+        check(framesL2 !== null && f.frames - framesL2 < 5, h.name + ' drew nothing in the second level while hidden (' + (f.frames - framesL2) + ' pictures asked for)');
         check(f.passes > 100, h.name + ' was driven by hidden-tab passes (' + f.passes + ')');
       }
     }
@@ -604,6 +622,7 @@ async function hiddenRoom(kinds, hiddenIndex, opts) {
     const ms = await room(relay, kinds, { tics: opts.tics || HIDDEN_TICS, query: opts.wakeEvery ? (i) => (i === hiddenIndex ? '&wake_every=' + opts.wakeEvery : '') : null });
     const h = ms[hiddenIndex];
     let hideTic = -1, tHide = 0, hidden = false, framesAtHide = 0, hiddenLogAtHide = 0, froze = false, fp = null;
+    let owedAtHide = 0, owedAtTo = -1, logAtTo = 0;
     const series = await sample(ms, opts.tics || HIDDEN_TICS, HIDDEN_TICS / NOMINAL * 1000 * 2.5 + 40000, async (t, ser) => {
       const tics = ser[hiddenIndex][ser[hiddenIndex].length - 1][1];
       if (!hidden && tics >= 100 && h.kind === 'browser') {
@@ -612,9 +631,14 @@ async function hiddenRoom(kinds, hiddenIndex, opts) {
         await sleep(300);
         framesAtHide = await h.page.evaluate(() => Module.jfswShowframes);
         hiddenLogAtHide = await h.page.evaluate(() => Module.jfswHiddenLog.length);
+        owedAtHide = await h.page.evaluate(() => Module.jfswOwedLog.length);
         hideTic = Math.floor((await h.dumpSize()) / REC);
         tHide = now();
         console.log('  ' + h.name + ' hidden at tic ' + hideTic);
+      }
+      if (hidden && owedAtTo < 0 && tics >= TO) {
+        owedAtTo = await h.page.evaluate(() => Module.jfswOwedLog.length).catch(() => -1);
+        logAtTo = await h.page.evaluate(() => Module.jfswHiddenLog.length).catch(() => 0);
       }
       if (opts.freeze && hidden && !froze && tics >= 300) {
         froze = true;
@@ -658,8 +682,11 @@ async function hiddenRoom(kinds, hiddenIndex, opts) {
       // an input that is made but held back by mmulti's 25 ms send window must not wait for the next network event: the pass
       // flushes it. So (almost) no yield is entered with data still owed.
       const passesPerSec = (logEnd - hiddenLogAtHide) / ((tEnd - tHide) / 1000);
-      console.log('  hidden passes (yields) a second while hidden: ' + passesPerSec.toFixed(0) + '; entered with data still held back: ' + wakes.owed.length + ' of ' + wakes.log);
-      check(wakes.owed.length <= 0.01 * wakes.log + 5, h.name + ' entered ' + wakes.owed.length + ' of ' + wakes.log + ' yields with data still held back (at most 1% and 5: a few come at the hide and at the end)');
+      console.log('  hidden passes (yields) a second while hidden: ' + passesPerSec.toFixed(0) + '; entered with data still held back: ' + wakes.owed.length + ' of ' + wakes.log + (wakes.owed.length ? ' (they lasted ' + wakes.owed.slice(0, 12).map((x) => Math.round(x)).join(', ') + ' ms' + (wakes.owed.length > 12 ? ', ...' : '') + ')' : ''));
+      // (counted from just after the hide to tic TO: the hide itself and -testquit's linger loop at the end are not what is measured)
+      const owedMid = owedAtTo >= 0 ? owedAtTo - owedAtHide : wakes.owed.length, logMid = owedAtTo >= 0 ? logAtTo - hiddenLogAtHide : wakes.log;
+      console.log('  between the hide and tic ' + TO + ': ' + owedMid + ' of ' + logMid + ' hidden yields entered with data held back');
+      check(owedMid <= 0.01 * logMid + 5, h.name + ' entered ' + owedMid + ' of ' + logMid + ' yields with data still held back between the hide and tic ' + TO + ' (at most 1% and 5)');
       // CPU: the tab must not spin. Every pass is a network event or the timer.
       check(passesPerSec < 150, h.name + ' ran ' + passesPerSec.toFixed(0) + ' hidden passes a second (under 150: it waits for network events)');
       check(wakes.frames - framesAtHide < 20, h.name + ' drew nothing while hidden (' + (wakes.frames - framesAtHide) + ' pictures asked for after hiding, in about 45 s)');
@@ -714,13 +741,13 @@ SCENARIOS['hidden-local'] = {
 // ---- what drawing writes (the drawing-state audit, code-facts.md section 20) -------------------------------------
 // A browser tab hidden from the start (it draws nothing: the game asks for no picture) plays with machines that draw, in a game that
 // goes where drawing writes to the simulation's tables. The dumps and the states must agree. 'camera': every player stands in front
-// of a security monitor and presses use (-testcam20,0): a machine that draws counts frames in the monitor's hittype temp_data[0];
-// 'mirror': in front of a mirror, firing the RPG from tic 80 (-testmirror20,0): drawn (a second drawrooms()), then broken.
+// of a security monitor and presses use (-testcam60,0): a machine that draws counts frames in the monitor's hittype temp_data[0];
+// 'mirror': in front of a mirror, firing the RPG from tic 120 (-testmirror60,0): drawn (a second drawrooms()), then broken.
 async function drawStateGame(label, kinds, hiddenIdx, hook, tics) {
   const relay = await startRelay();
   try {
     console.log('  ' + label + ': ' + kinds.join(' + ') + ', ' + kinds[hiddenIdx] + ' ' + hiddenIdx + ' hidden from the start (' + LOAD() + ')');
-    const ms = await room(relay, kinds, { tics, state: true, extra: () => [hook] });
+    const ms = await room(relay, kinds, { tics, state: [tics], extra: () => [hook] });
     const h = ms[hiddenIdx];
     const t0 = now();
     while (now() - t0 < 60000 && (await h.dumpSize()) < 3 * REC) { await sleep(50); }
@@ -759,8 +786,8 @@ async function drawStateGame(label, kinds, hiddenIdx, hook, tics) {
 SCENARIOS['draw-state'] = {
   what: 'a hidden tab (no drawing) and machines that draw stay in sync over security cameras (animatecamsprite) and a mirror (drawn, then broken by rockets)',
   run: async () => {
-    await drawStateGame('camera', ['browser', 'browser', 'native'], 1, '-testcam20,0', 400);
-    await drawStateGame('mirror', ['browser', 'native', 'browser'], 2, '-testmirror20,0', 500);
+    await drawStateGame('camera', ['browser', 'browser', 'native'], 1, '-testcam60,0', 400);
+    await drawStateGame('mirror', ['browser', 'native', 'browser'], 2, '-testmirror60,0', 600);
   },
 };
 
@@ -950,7 +977,7 @@ SCENARIOS.gate = {
     let relay = null;
     try {
       CONFIG_ALLOW = false;
-      relay = await startRelay();
+      relay = await startRelay(['-stats', '127.0.0.1:' + (PORT_BASE + 50)]);
       const m = await browserMachine('gate', gameArgs({ net: ['-relay', relay.ws, '-host-room', '2'], testsync: false }), { dump: 'd.bin' });
       await m.start();
       const st = await m.waitEnd(30000);
@@ -962,8 +989,8 @@ SCENARIOS.gate = {
       check(!/room code/.test(out), 'no room was made (the gate comes before the relay)');
       check(await m.page.evaluate(() => window.jfswArgs.indexOf('-allowsharewarenet') < 0), 'the page did not pass -allowsharewarenet');
       check(!(await m.page.evaluate(() => /allowsharewarenet/i.test(location.search))), 'and nothing in the address asked for it');
-      const stats = await new Promise((resolve) => { require('http').get('http://127.0.0.1:' + PORT_HTTP + '/stats', (r) => { let t = ''; r.on('data', (d) => { t += d; }); r.on('end', () => resolve(t)); }).on('error', () => resolve('')); });
-      check(!/"rooms":\s*[1-9]/.test(stats), 'the relay holds no room (' + stats.slice(0, 80).replace(/\s+/g, ' ') + ')');
+      const stats = await new Promise((resolve) => { require('http').get('http://127.0.0.1:' + (PORT_BASE + 50) + '/stats', (r) => { let t = ''; r.on('data', (d) => { t += d; }); r.on('end', () => { try { resolve(JSON.parse(t)); } catch (e) { resolve(null); } }); }).on('error', () => resolve(null)); });
+      check(!!stats && stats.rooms_created === 0 && stats.websockets === 0, 'the relay never saw the machine: no room made, no connection (rooms_created ' + (stats && stats.rooms_created) + ', websockets ' + (stats && stats.websockets) + ')');
       await m.stop(); machines.splice(machines.indexOf(m), 1);
       // a visitor's address: no ?test=1 (and testMode false in config.js): ?args= is not read, so -allowsharewarenet cannot come from the address
       await closeEnv();
