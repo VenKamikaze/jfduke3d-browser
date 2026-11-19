@@ -140,4 +140,5 @@ void HiddenNetPass(void)
     for (n = 0; n < 8 && ready2send && totalclock >= ototalclock + TICSPERFRAME; n++)
         faketimerhandler();
     checksync();
+    mmulti_vnet_flush();
 }
