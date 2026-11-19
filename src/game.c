@@ -446,6 +446,23 @@ void adduserquote(char *daquote)
 }
 
 
+static int masterfwdsincetick;     // the master has sent a tic since its last timer tick (the 127 nudge, faketimerhandler())
+
+// Brief 04b: this machine's input (a slave's packet 1, peer-to-peer packets 16 and 17) or the master's
+// combined packet 0 goes on the wire when it is made, not at the next dosendpackets() after mmulti's 25 ms
+// send window (PAKRATE) has passed. getpackets(), which faketimerhandler() calls before it makes the
+// input, can already have spent the window on a datagram with only acknowledgements, and then the input
+// waited up to 25 ms (a native machine) or a browser frame or two (16 to 33 ms). This changes when a
+// datagram goes, not what is in it. mmulti_vnet_flush() (jfbuild mmulti.c) is not specific to vnet: it
+// sends whatever sendpacket() has queued, to plain UDP peers as well. Datagrams that carry only
+// acknowledgements or resends still go at most once per window.
+static void SendInputNow(void)
+{
+    if (TestLagOn) TestLagFlushing(1);      // test-only: -testlag
+    mmulti_vnet_flush();
+    if (TestLagOn) TestLagFlushing(0);
+}
+
 void getpackets(void)
 {
     int i, j, k, l;
@@ -458,6 +475,7 @@ void getpackets(void)
     if( !(ps[myconnectindex].gm&MODE_GAME) ) { OSD_DispatchQueued(); }
 
     if (numplayers < 2) return;
+    if (TestLagOn) TestLagPassStart();      // test-only: -testlag
     while ((packbufleng = getpacket(&other,packbuf)) > 0)
     {
         switch(packbuf[0])
@@ -788,7 +806,31 @@ void getpackets(void)
                 gameexit(" ");
                 break;
         }
+        if (TestLagOn) TestLagScan();       // test-only: -testlag
     }
+
+    // Brief 04b: a slave's input may have been the last one missing for a tic. The master passes that tic
+    // on now, not when it next makes an input of its own (its next timer tick, up to a tic later). This is
+    // after the receive loop on purpose: packbuf is the receive buffer and sendmasterpackets() builds
+    // its packets in it, so it must not run while a datagram is still being read from it. The same
+    // function, the same inputs and the same order of tics as faketimerhandler() sends; the bytes that
+    // depend on when the master sends follow its timing, as they always did: the lag-correction bytes of
+    // every TIMERUPDATESIZ-th tic (each slave's myminlag so far) and which of the master's pending sync
+    // bytes go in which packet. The conditions: a master that is allowed to send, as in
+    // faketimerhandler() (ready2send is 0 from the start of the program until the first level has
+    // started, and from the end of a level until the next one has: D5, D6, D11), and **not inside
+    // waitforeverybody()** (inbarrier). Before 04b nothing was forwarded in a barrier. ready2send is
+    // still 1 in newgame()'s first barrier (a new game from the menu or a packet 5 or 8 in the middle
+    // of a game) and in saveplayer()'s, and the master's own queue is full there: a slave's inputs
+    // of the running game that are still on their way would be forwarded after the master's ready
+    // packet, and a packet 0 has no tic number and no waitingfornewlevel guard (only packet 1 has), so
+    // one that reaches a slave after it has cleared its queues would be taken for a tic of the new level
+    // (found by reading in 04b's review; with 700 ms on the slave's datagrams, -testnewgame, and no gate here,
+    // the master hung and the slave crashed).
+    // Otherwise sendmasterpackets() sends a tic only when every player's input for it is here, the
+    // master's included, and a batch of movesperpacket tics always goes whole.
+    if (networkmode == 0 && myconnectindex == connecthead && ready2send && !inbarrier)
+        sendmasterpackets(0x7fffffff);
 }
 
 extern void computergetinput(int snum, input *syn);
@@ -820,6 +862,7 @@ void faketimerhandler()
      {
           copybufbyte(&inputfifo[(movefifoend[myconnectindex]-1)&(MOVEFIFOSIZ-1)][myconnectindex],
                           &inputfifo[movefifoend[myconnectindex]&(MOVEFIFOSIZ-1)][myconnectindex],sizeof(input));
+          if (TestLagOn) TestLagMade(movefifoend[myconnectindex], 1);   // test-only: -testlag
           movefifoend[myconnectindex]++;
           return;
      }
@@ -830,6 +873,7 @@ void faketimerhandler()
      nsyn[0].horz = avghorz/movesperpacket;
      nsyn[0].bits = avgbits;
      avgfvel = avgsvel = avgavel = avghorz = avgbits = 0;
+     if (TestLagOn) TestLagMade(movefifoend[myconnectindex], 0);   // test-only: -testlag
      movefifoend[myconnectindex]++;
 
      if (numplayers < 2)
@@ -877,6 +921,7 @@ void faketimerhandler()
                 else i = 0;
 
                 totalclock -= TICSPERFRAME*i;
+                if (TestLagOn) TestLagCorrect(-TICSPERFRAME*i);     // test-only: -testlag
                 myminlag[connecthead] -= i; otherminlag += i;
             }
 
@@ -927,9 +972,12 @@ void faketimerhandler()
             syncvaltail++;
         }
 
+        if (TestLagOn) TestLagTag(movefifoend[myconnectindex]-1);   // test-only: -testlag
         for(i=connecthead;i>=0;i=connectpoint2[i])
             if (i != myconnectindex)
                 sendpacket(i,packbuf,j);
+        if (TestLagOn) TestLagTag(-1);
+        SendInputNow();
 
         return;
     }
@@ -944,6 +992,7 @@ void faketimerhandler()
             else i = 0;
 
             totalclock -= TICSPERFRAME*i;
+            if (TestLagOn) TestLagCorrect(-TICSPERFRAME*i);     // test-only: -testlag
             myminlag[connecthead] -= i; otherminlag += i;
 
             for(i=connecthead;i>=0;i=connectpoint2[i])
@@ -988,38 +1037,57 @@ void faketimerhandler()
             syncvaltail++;
         }
 
+        if (TestLagOn) TestLagTag(movefifoend[myconnectindex]-1);   // test-only: -testlag
         sendpacket(connecthead,packbuf,j);
+        if (TestLagOn) TestLagTag(-1);
+        SendInputNow();
         return;
     }
 
           //This allows packet resends
+          // Brief 04b: a tick at which the master has already passed a tic on (getpackets() does it as soon
+          // as the last input is in) is a tick at which, before 04b, it would have sent that tic and no nudge:
+          // the nudge is only for a tick that sent nothing. Without this each such tick sent a nudge as well,
+          // one more reliable packet per tic, and at 400 ms of latency and more (the packets in flight
+          // fill mmulti's 256 byte datagram) the slave fell behind (04b-lag-cuts.md, Outcome, fix round).
     for(i=connecthead;i>=0;i=connectpoint2[i])
         if (movefifoend[i] <= movefifosendplc)
         {
-            packbuf[0] = 127;
-            for(i=connectpoint2[connecthead];i>=0;i=connectpoint2[i])
-               sendpacket(i,packbuf,1);
+            if (!masterfwdsincetick)
+            {
+                packbuf[0] = 127;
+                for(i=connectpoint2[connecthead];i>=0;i=connectpoint2[i])
+                   sendpacket(i,packbuf,1);
+            }
+            masterfwdsincetick = 0;
             return;
         }
 
     sendmasterpackets(0x7fffffff);
+    masterfwdsincetick = 0;
 }
 
      //Master: send the slaves the inputs of the tics before tic UPTO that every player has an input for
 void sendmasterpackets(int upto)
 {
     int i, j, k;
+    int sent = 0;
     input *osyn, *nsyn;
 
     while (movefifosendplc < upto)  //Master
     {
         for(i=connecthead;i>=0;i=connectpoint2[i])
-            if (playerquitflag[i] && (movefifoend[i] <= movefifosendplc)) return;
+            if (playerquitflag[i] && (movefifoend[i] <= movefifosendplc))
+            {
+                if (sent) SendInputNow();       // (04b) what was queued goes out now
+                return;
+            }
 
         osyn = (input *)&inputfifo[(movefifosendplc-1)&(MOVEFIFOSIZ-1)][0];
         nsyn = (input *)&inputfifo[(movefifosendplc  )&(MOVEFIFOSIZ-1)][0];
 
             //MASTER -> SLAVE packet
+        if (TestLagOn) TestLagForward(movefifosendplc);     // test-only: -testlag
         packbuf[0] = 0; j = 1;
 
             //Fix timers and buffer/jitter value
@@ -1076,6 +1144,7 @@ void sendmasterpackets(int upto)
             syncvaltail++;
         }
 
+        if (TestLagOn) TestLagTag(movefifosendplc);     // test-only: -testlag
         for(i=connectpoint2[connecthead];i>=0;i=connectpoint2[i])
             if (playerquitflag[i])
             {
@@ -1083,9 +1152,14 @@ void sendmasterpackets(int upto)
                  if (nsyn[i].bits&(1<<26))
                     playerquitflag[i] = 0;
             }
+        if (TestLagOn) TestLagTag(-1);
 
         movefifosendplc += movesperpacket;
+        sent = 1;
+        masterfwdsincetick = 1;
+        if (inbarrier) buildprintf("TEST: the master forwarded tic %d inside a barrier (04b: it must not)\n", movefifosendplc);
     }
+    if (sent) SendInputNow();
 }
 
 extern int cacnum;
@@ -7062,6 +7136,15 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"testfire",8)) {
                     TestFireArg(atoi(c+8));     // test-only: this machine's player fires and walks about from tic N on
                 }
+                else if (!Bstrncasecmp(c,"testlag",7)) {
+                    TestLagArg(c+7);            // test-only: this machine's input-to-tic timing, to a file (04b)
+                }
+                else if (!Bstrncasecmp(c,"testslowstart",13)) {
+                    TestSlowStartArg(atoi(c+13));   // test-only: this machine waits before the first frame of its level (04b)
+                }
+                else if (!Bstrncasecmp(c,"testnewgame",11)) {
+                    TestNewGameArg(atoi(c+11));     // test-only: this machine starts a new game after T tics of the first level
+                }
                 else if (!Bstrncasecmp(c,"testsave",8)) {
                     TestSaveArg(atoi(c+8));     // test-only: this machine asks for a multiplayer save game at tic T
                 }
@@ -8184,6 +8267,8 @@ if (VOLUMEONE) {
 
         OSD_DispatchQueued();
         NetLostCheck();     // a relay session lost during the game ends it (L18)
+
+        TestNewGamePoll();      // test-only: -testnewgame
 
         if( ud.recstat == 2 || ud.multimode > 1 || ( ud.show_help == 0 && (ps[myconnectindex].gm&MODE_MENU) != MODE_MENU ) )
             if( ps[myconnectindex].gm&MODE_GAME )

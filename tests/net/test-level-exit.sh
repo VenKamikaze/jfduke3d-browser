@@ -23,7 +23,7 @@
 #                  queue as the inputs of its first tics (inputs carry no tic number), and the slave plays its own fresh
 #                  inputs there: the slave's player is somewhere else on the master and the other slave than on the slave
 #
-#   tests/net/test-level-exit.sh [--game FILE] [--runs N] [--only NAME]
+#   tests/net/test-level-exit.sh [--game FILE] [--runs N] [--only NAME] [--mpp 2|4]
 #       names: relay-slave, relay-master, relay-3, udp-slave, udp-master, udp-3, relay-late, udp-late
 #       (--only may be given several times; the default is the first six; the two late ones are in the default too since brief 04)
 #
@@ -38,12 +38,13 @@
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-game="$root/duke3d"; runs=1; only=()
+game="$root/duke3d"; runs=1; only=(); mpp=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --game) game="$2"; shift 2 ;;
         --runs) runs="$2"; shift 2 ;;
         --only) only+=("$2"); shift 2 ;;
+        --mpp) mpp=" -f$2"; shift 2 ;;      # 04b: movesperpacket 2 or 4 on every machine
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -52,7 +53,7 @@ t_need_data
 
 exit_tic=200; stall_tic=190; tics=300; limit=60
 rport=$((port_base + 100)); uport=$((port_base + 110))
-common="-v1 -l1 -c2 -testsync -testquit$tics -testdumpd.bin -teststate -teststate$tics -testexit$exit_tic -testfire150"
+common="-v1 -l1 -c2 -testsync -testquit$tics -testdumpd.bin -teststate -teststate$tics -testexit$exit_tic -testfire150$mpp"
 t_start_relay "$rport"
 
 # block TIC LEVEL FILE: the state dump's block of the given tic of the given level

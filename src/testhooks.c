@@ -4,6 +4,10 @@
 #include "duke3d.h"
 #include "testhooks.h"
 #include "netgame.h"
+#include "mmulti_vnet.h"
+#ifndef _WIN32
+#include <time.h>
+#endif
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -15,6 +19,7 @@ int TestNudgeTic = -1;
 static int TestExitTic;         // -testexit<T>; 0 = off
 static int TestFireOn, TestFireFrom;
 static int TestArmOn;           // -testarm
+static int TestFramesAtStart;   // numframes when the level started (TestLevelStarted(); a -testdump machine logs the frames drawn before tic 1)
 static int TestLevelNo;         // the number of the level being played: 1 for the first, counted at its tic 1
 static int TestCamTic, TestCamNum, TestMirrorTic, TestMirrorNum;     // -testcam<T>,<n>, -testmirror<T>,<n> (brief 04)
 int TestNoDrawOn;               // -testnodraw (brief 04)
@@ -930,6 +935,331 @@ static void TestGoTic(int tic)
         buildprintf("TEST: go: mirror wall %d: overpicnum %d (%d = intact), picnum %d\n", mirrorwall[TestMirrorNum], wall[mirrorwall[TestMirrorNum]].overpicnum, MIRROR, wall[mirrorwall[TestMirrorNum]].picnum);
 }
 
+// ---- -testlag<name>: input-to-tic timing (brief 04b) -------------------------------------------------
+//
+// This machine writes 36 bytes (nine little endian 32 bit fields) for every game tic to the file <name>, all
+// from this machine's own clock (CLOCK_MONOTONIC, microseconds since the first record: only differences on the
+// same machine mean anything). For the tic that domovethings() ran, with n the input fifo index it consumed:
+//   0 tic         the game tic, counted from 1 at the start of each level (as -testdump)
+//   1 made        when this machine's own input n was made (faketimerhandler(), after getinput())
+//   2 ready       when every player's input n was on this machine (the last of the others' arrivals as
+//                 getpackets() stored them, and the own input)
+//   3 ran         when the tic ran (the hook is at the start of the tic)
+//   4 sendwait    how long the packet that carried this tic's data to the next machine waited between
+//                 sendpacket() and a datagram leaving: a slave's own input, or the master's combined packet
+//                 (the longest over its slaves); 0xFFFFFFFF if unknown
+//   5 fwdwait     the master only: from "ready" to the combined packet being handed to sendpacket();
+//                 0xFFFFFFFF on a slave
+//   6 otherminlag (signed) the lag correction's view
+//   7 bufferjitter (signed)
+//   8 clockcorr   (signed) the sum of every totalclock correction so far, in clock ticks (a game tic is 4)
+// and at -testquit the log says how many datagrams went to each peer. Input to tic is ran - made; ran - ready
+// is the time a complete tic waits for the lockstep buffer (bufferjitter). A tic's record is written 16 tics
+// after it ran (the last 16 at -testquit), when its packets have left: the datagram, and on the master the
+// combined packet, often leave only after the tic has run, and a record written at once would say "unknown"
+// for exactly the waits it is there to measure. Nothing goes on the wire and nothing in the game changes; without
+// the argument none of this runs. (jfSW's sync.c, with Duke's fifo and tic numbers.)
+
+int TestLagOn;
+static char TestLagName[260];
+static FILE *TestLagFile;
+static unsigned long long TestLagBase;
+static unsigned int TestLagMadeT[MOVEFIFOSIZ], TestLagSendWait[MOVEFIFOSIZ], TestLagFwdWait[MOVEFIFOSIZ];
+static unsigned int TestLagArrive[MAXPLAYERS][MOVEFIFOSIZ];
+static int TestLagSeen[MAXPLAYERS];
+static int TestLagCurIdx = -1;
+static int TestLagClockCorr;
+// per peer output queue (mmulti's ocnt): when it was queued, which fifo index it carries, how far datagrams have carried it
+#define TESTLAG_Q 512
+static unsigned int TestLagQT[16][TESTLAG_Q];
+static int TestLagQIdx[16][TESTLAG_Q];
+static int TestLagQHW[16];
+static unsigned int TestLagDgrams[16], TestLagDBytes[16], TestLagDFirst[16], TestLagDLast[16];
+// what kind of datagram: one that carries a new input or combined packet (sent by sendpacket() itself or by the
+// flush after it, SendInputNow()), or one paced by mmulti's window with only acknowledgements and resends (from
+// getpacket()); and how many of the paced ones went in the same getpackets() pass as a new-data one that came
+// after them (that one carries the same acknowledgements and every unacknowledged packet, so the paced one was
+// redundant)
+static unsigned int TestLagDFlushed[16], TestLagDPaced[16], TestLagDRedundant[16];
+static int TestLagInFlush, TestLagPass, TestLagPacedPass[16];
+
+#ifdef _WIN32
+// kernel32's high resolution counter, declared as windows.h declares it (BOOL WINAPI, LARGE_INTEGER *) so that
+// this file need not include windows.h. MSVC has no clock_gettime. (jfSW's review S1; not built with MSVC here.)
+union _LARGE_INTEGER;
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(union _LARGE_INTEGER *);
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(union _LARGE_INTEGER *);
+#endif
+
+static unsigned int TestLagNow(void)
+{
+    unsigned long long t;
+#ifdef _WIN32
+    long long c = 0, fr = 0;
+    QueryPerformanceCounter((union _LARGE_INTEGER *)&c);
+    QueryPerformanceFrequency((union _LARGE_INTEGER *)&fr);
+    t = fr > 0 ? (unsigned long long)(c / fr) * 1000000ull + (unsigned long long)(c % fr) * 1000000ull / (unsigned long long)fr : 0;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    t = (unsigned long long)ts.tv_sec * 1000000ull + ts.tv_nsec / 1000;
+#endif
+    if (!TestLagBase) TestLagBase = t;
+    return (unsigned int)(t - TestLagBase);
+}
+
+static void TestLagQueueHook(int other, int ocnt)
+{
+    TestLagQT[other & 15][ocnt & (TESTLAG_Q - 1)] = TestLagNow();
+    TestLagQIdx[other & 15][ocnt & (TESTLAG_Q - 1)] = TestLagCurIdx;
+}
+
+static void TestLagSendHook(int other, int ocnt1, int nbytes)
+{
+    unsigned int t = TestLagNow();
+    int o = other & 15, i;
+
+    if (!TestLagDgrams[o]) TestLagDFirst[o] = t;
+    TestLagDgrams[o]++;
+    TestLagDBytes[o] += nbytes;
+    TestLagDLast[o] = t;
+    if (TestLagInFlush || TestLagCurIdx >= 0) {         // carries a new input or combined packet
+        TestLagDFlushed[o]++;
+        if (TestLagPacedPass[o] == TestLagPass) {
+            TestLagDRedundant[o]++;
+            TestLagPacedPass[o] = 0;
+        }
+    } else {
+        TestLagDPaced[o]++;
+        TestLagPacedPass[o] = TestLagPass;
+    }
+    for (i = TestLagQHW[o]; i < ocnt1; i++) {
+        int idx = TestLagQIdx[o][i & (TESTLAG_Q - 1)];
+        unsigned int w = t - TestLagQT[o][i & (TESTLAG_Q - 1)];
+        if (idx >= 0 && (TestLagSendWait[idx & (MOVEFIFOSIZ - 1)] == 0xFFFFFFFFu || w > TestLagSendWait[idx & (MOVEFIFOSIZ - 1)]))
+            TestLagSendWait[idx & (MOVEFIFOSIZ - 1)] = w;
+    }
+    if (ocnt1 > TestLagQHW[o]) TestLagQHW[o] = ocnt1;
+}
+
+void TestLagArg(const char *name)
+{
+    strncpy(TestLagName, name, sizeof(TestLagName) - 1);
+    TestLagName[sizeof(TestLagName) - 1] = 0;
+    TestLagOn = 1;
+    mmulti_test_queuehook = TestLagQueueHook;
+    mmulti_test_sendhook = TestLagSendHook;
+}
+
+// getpackets() begins (a new pass), and SendInputNow() flushes (on = 1) or has flushed (on = 0).
+void TestLagPassStart(void) { TestLagPass++; }
+void TestLagFlushing(int on) { TestLagInFlush = on; }
+
+// This machine made its own input number idx (called just before movefifoend[myconnectindex]++). With
+// movesperpacket > 1 only every movesperpacket-th input is made by getinput(); the others repeat it, and keep
+// the time of the one they repeat (copy = 1).
+void TestLagMade(int idx, int copy)
+{
+    int k = idx & (MOVEFIFOSIZ - 1);
+
+    if (!copy) TestLagMadeT[k] = TestLagNow();
+    else TestLagMadeT[k] = TestLagMadeT[(idx - 1) & (MOVEFIFOSIZ - 1)];
+    TestLagArrive[myconnectindex][k] = copy ? TestLagNow() : TestLagMadeT[k];
+    TestLagSendWait[k] = 0xFFFFFFFFu;
+    TestLagFwdWait[k] = 0xFFFFFFFFu;
+}
+
+// Note which fifo index the next packet handed to mmulti carries (-1: none).
+void TestLagTag(int idx) { TestLagCurIdx = idx; }
+
+// Called after getpackets() stored a packet: stamp every input that has arrived since.
+void TestLagScan(void)
+{
+    int p, i;
+    unsigned int t = 0;
+
+    for (p = connecthead; p >= 0; p = connectpoint2[p]) {
+        if (p == myconnectindex) continue;
+        if (movefifoend[p] < TestLagSeen[p]) TestLagSeen[p] = 0;     // a new level: the fifos started again
+        for (i = TestLagSeen[p]; i < movefifoend[p]; i++) {
+            if (!t) t = TestLagNow();
+            TestLagArrive[p][i & (MOVEFIFOSIZ - 1)] = t;
+        }
+        if (movefifoend[p] > TestLagSeen[p]) TestLagSeen[p] = movefifoend[p];
+    }
+}
+
+// The master is about to hand the combined packet for fifo index idx to sendpacket(): how long since that tic
+// was complete (its own input made and every slave's arrived).
+void TestLagForward(int idx)
+{
+    int p, k = idx & (MOVEFIFOSIZ - 1);
+    unsigned int ready = 0, t = TestLagNow();
+
+    for (p = connecthead; p >= 0; p = connectpoint2[p])
+        if (TestLagArrive[p][k] > ready) ready = TestLagArrive[p][k];
+    TestLagFwdWait[k] = t - ready;
+    TestLagSendWait[k] = 0xFFFFFFFFu;
+}
+
+void TestLagCorrect(int clockticks) { TestLagClockCorr += clockticks; }
+
+#define TESTLAG_DEFER 16
+static unsigned int TestLagPend[MOVEFIFOSIZ][5];        // tic, ready, ran, otherminlag, bufferjitter
+static int TestLagPendCorr[MOVEFIFOSIZ];
+static int TestLagPendOn[MOVEFIFOSIZ];
+
+static void TestLagWrite(int k)
+{
+    unsigned char rec[36];
+    unsigned int f[9];
+    int i, b;
+
+    if (!TestLagPendOn[k]) return;
+    TestLagPendOn[k] = 0;
+    f[0] = TestLagPend[k][0];
+    f[1] = TestLagMadeT[k];
+    f[2] = TestLagPend[k][1];
+    f[3] = TestLagPend[k][2];
+    f[4] = TestLagSendWait[k];
+    f[5] = (myconnectindex == connecthead) ? TestLagFwdWait[k] : 0xFFFFFFFFu;
+    f[6] = TestLagPend[k][3];
+    f[7] = TestLagPend[k][4];
+    f[8] = (unsigned int)TestLagPendCorr[k];
+    for (i = 0; i < 9; i++)
+        for (b = 0; b < 4; b++)
+            rec[i * 4 + b] = (f[i] >> (8 * b)) & 255;
+    fwrite(rec, 1, sizeof(rec), TestLagFile);
+    fflush(TestLagFile);
+}
+
+// domovethings(): the tic is going to run (from TestTicHook()); movefifoplc is the input it consumes.
+static void TestLagTic(int tic)
+{
+    unsigned int ready = 0;
+    int p, k = movefifoplc & (MOVEFIFOSIZ - 1);
+
+    if (!TestLagOn) return;
+    if (!TestLagFile) {
+        TestLagFile = fopen(TestLagName, "wb");
+        if (!TestLagFile) {
+            TestLagOn = 0;
+            buildprintf("TEST: cannot write the lag record %s\n", TestLagName);
+            return;
+        }
+        buildprintf("TEST: writing the lag record %s (36 bytes a tic)\n", TestLagName);
+    }
+    for (p = connecthead; p >= 0; p = connectpoint2[p])
+        if (TestLagArrive[p][k] > ready) ready = TestLagArrive[p][k];
+    TestLagPend[k][0] = (unsigned int)tic;
+    TestLagPend[k][1] = ready;
+    TestLagPend[k][2] = TestLagNow();
+    TestLagPend[k][3] = (unsigned int)otherminlag;
+    TestLagPend[k][4] = (unsigned int)bufferjitter;
+    TestLagPendCorr[k] = TestLagClockCorr;
+    TestLagPendOn[k] = 1;
+    TestLagWrite((movefifoplc - TESTLAG_DEFER) & (MOVEFIFOSIZ - 1));
+}
+
+// -testquit: the last tics' records, and the datagram count per peer.
+void TestLagReport(void)
+{
+    int p, i;
+
+    if (!TestLagOn) return;
+    if (TestLagFile)
+        for (i = TESTLAG_DEFER; i >= 0; i--)
+            TestLagWrite((movefifoplc - 1 - i) & (MOVEFIFOSIZ - 1));
+    for (p = connecthead; p >= 0; p = connectpoint2[p])
+        if (p != myconnectindex && TestLagDgrams[p & 15])
+            buildprintf("TEST: lag: %u datagrams (%u bytes) to player %d in %u ms: %u with new data, %u paced (acks and resends only), %u of those just before one with new data in the same receive pass\n",
+                TestLagDgrams[p & 15], TestLagDBytes[p & 15], p, (TestLagDLast[p & 15] - TestLagDFirst[p & 15]) / 1000,
+                TestLagDFlushed[p & 15], TestLagDPaced[p & 15], TestLagDRedundant[p & 15]);
+}
+
+// ---- -testslowstart<ms> (brief 04b, the tic1 scenario) ---------------------------------------------------
+//
+// This machine waits <ms> milliseconds when its level has started (enterlevel() has finished, the clock runs) and
+// before its first frame of it, so that it draws a single frame before the tic that follows, while the other
+// machines have drawn many: the uneven start that the tic 1 check needs, made certain. Per machine; it changes
+// nothing but when this machine starts. TestLevelStarted() also notes the frame count at that moment, so
+// that a -testdump machine can log how many frames it drew before its tic 1 ("TEST: frames drawn before tic 1 of level N: F").
+
+static int TestSlowStartMs;
+
+void TestSlowStartArg(int ms) { TestSlowStartMs = ms; }
+
+void TestLevelStarted(void)
+{
+    TestFramesAtStart = numframes;
+    if (TestSlowStartMs <= 0) return;
+    buildprintf("TEST: waiting %d ms before the first frame\n", TestSlowStartMs);
+    // what waitforeverybody() last queued may still be held by mmulti's send window; let it out first, or
+    // the others would wait in theirs until this machine polls again after the wait
+    mmulti_vnet_flush();
+#ifdef __EMSCRIPTEN__
+    // by yielding (ASYNCIFY): a busy wait would also stop the other pages that share the renderer process,
+    // the other players of a test among them
+    emscripten_sleep(TestSlowStartMs);
+#else
+    {
+        unsigned int t0 = getticks();
+        while ((int)(getticks() - t0) < TestSlowStartMs)
+            ;
+    }
+#endif
+}
+
+// ---- -testnewgame<T> (brief 04b fix round) ----------------------------------------------------------------
+//
+// This machine starts a new game (the same level again, packet 5) when it has played T tics of the first level: it
+// does what the menu's "start game" does (menues.c): resets every player's weapons and inventory, sends packet 5
+// to the others (a slave only to the master, which passes it on), then newgame() and enterlevel(). Everybody
+// else starts the new game when the packet reaches them, so the machines have played different numbers of tics of
+// the old level, and every machine's dump from its last "tic 1" on must be the same. The master that starts one
+// reaches newgame()'s waitforeverybody() with slaves' inputs of the running game still on their way, which is
+// what a step 3 forward in a barrier would have sent on after the master's ready packet. Per machine; changes
+// nothing without the argument. Use it with -testquit<N> (counted in tics of the new level).
+
+static int TestNewGameTic, TestNewGameDone;
+
+void TestNewGameArg(int tic) { TestNewGameTic = tic; }
+
+void TestNewGamePoll(void)
+{
+    unsigned char b[11];
+    int c;
+
+    if (TestNewGameTic <= 0 || TestNewGameDone || TestLevelNo != 1 || numplayers < 2 || movefifoplc < TestNewGameTic) return;
+    if (!(ps[myconnectindex].gm & MODE_GAME)) return;
+    TestNewGameDone = 1;
+    buildprintf("TEST: starting a new game after %d tics\n", movefifoplc);
+    b[0] = 5;
+    b[1] = ud.m_level_number;
+    b[2] = ud.m_volume_number;
+    b[3] = ud.m_player_skill + 1;
+    ud.m_respawn_monsters = (ud.m_player_skill == 3);
+    ud.m_respawn_items = (ud.m_coop == 0);
+    ud.m_respawn_inventory = 1;
+    b[4] = ud.m_monsters_off;
+    b[5] = ud.m_respawn_monsters;
+    b[6] = ud.m_respawn_items;
+    b[7] = ud.m_respawn_inventory;
+    b[8] = ud.m_coop;
+    b[9] = ud.m_marker;
+    b[10] = ud.m_ffire;
+    for (c = connecthead; c >= 0; c = connectpoint2[c]) {
+        resetweapons(c);
+        resetinventory(c);
+    }
+    for (c = connecthead; c >= 0; c = connectpoint2[c]) {
+        if (c != myconnectindex) sendpacket(c, b, 11);
+        if ((!networkmode) && (myconnectindex != connecthead)) break;      // slaves in M/S mode only send to master
+    }
+    newgame(ud.m_volume_number, ud.m_level_number, ud.m_player_skill + 1);
+    if (enterlevel(MODE_GAME)) backtomenu();
+}
+
 // ---- The hooks in domovethings() ---------------------------------------------------------------
 
 void TestTicHook(void)
@@ -939,6 +1269,9 @@ void TestTicHook(void)
     if (tic == 1) TestLevelNo++;
     if (tic == 1 && TestLevelNo == 1 && (TestSyncOn || TestDumpName[0]))
         buildprintf("TEST: SoundToggle %d, AmbienceToggle %d\n", SoundToggle, AmbienceToggle);
+    // how many frames this machine drew between the start of its level and its tic 1 (the tic1 scenario: -testslowstart)
+    if (tic == 1 && TestDumpName[0])
+        buildprintf("TEST: frames drawn before tic 1 of level %d: %d\n", TestLevelNo, numframes - TestFramesAtStart);
 
     // a game started with -v1 -l1 gives co-op players no weapons (newgame() only does for a deathmatch;
     // a game started from the menu resets them with the new-game packet): give them the starting ones,
@@ -981,6 +1314,7 @@ void TestTicHook(void)
         ps[myconnectindex].posx += 8;
     }
     TestGoTic(tic);
+    TestLagTic(tic);
     if (TestDumpName[0]) {
         TestStateTic(tic);
         TestDumpTic(tic);
@@ -999,6 +1333,7 @@ static void TestQuitFinish(void)
     if (TestDrawCheckOn)
         buildprintf("TEST: draw check: %d frames checked, %d of them changed the simulation's tables, %d fields in all\n", DcFrames, DcChangedFrames, DcFields);
     if (TestDumpFile) fflush(TestDumpFile);
+    TestLagReport();
 
     // a player that is a few tics behind still needs what we send: keep acknowledging and
     // resending for a moment before leaving, and (the master) send the slaves the tics it has played

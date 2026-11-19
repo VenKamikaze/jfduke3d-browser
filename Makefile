@@ -289,9 +289,13 @@ test-net: engine-current
 	tests/net/test-three-games.sh --relay --impair "loss=3,dup=2,reorder=3,lat=10,jit=5" --tics 600
 	tests/net/test-three-games.sh --udp
 	tests/net/test-three-games.sh --relay --nosound 1 --fire --tics 600
+	@# 04b: movesperpacket 2 and 4 (-f2, -f4): inputs and tics go in batches, the master forwards whole batches
+	tests/net/test-three-games.sh --relay --mpp 2 --fire --tics 600
+	tests/net/test-three-games.sh --udp --mpp 4 --tics 600
 	tests/net/test-desync.sh
 	tests/net/test-player-announce.sh
 	tests/net/test-level-exit.sh
+	tests/net/test-level-exit.sh --mpp 4 --only relay-slave --only relay-master --only relay-late
 	tests/net/test-predict-pure.sh
 	tests/net/test-nodraw.sh
 	tests/net/test-save.sh

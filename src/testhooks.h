@@ -36,6 +36,14 @@
 //   -testsave<T>       (04) this machine asks for a multiplayer save game (slot 0) in its input for game tic T of the first
 //                      level, as the save menu does; every machine saves in that tic. Per machine (the others get the
 //                      request on the wire), nothing in the simulation.
+//   -testlag<name>     (04b) this machine writes 36 bytes for every game tic to the file <name>: when its own input was
+//                      made, when every input was here, when the tic ran, how long its packet waited in mmulti before a
+//                      datagram left, how long the master held a complete tic, otherminlag, bufferjitter, the clock
+//                      corrections; and at -testquit the datagrams sent to each peer. Observation only (testhooks.c).
+//   -testslowstart<ms> (04b) this machine waits <ms> ms when its level has started, before its first frame: an uneven
+//                      start for the tic 1 check. Per machine; changes nothing but when this machine starts.
+//   -testnewgame<T>    (04b fix round) this machine starts a new game (packet 5, as the menu does) when it has played T tics
+//                      of the first level; the others follow when the packet reaches them. Per machine.
 //   -testmenu          (D3) "TEST: menu N" is printed whenever the menu of a game opens, changes or closes.
 //   -testpredict       (A1) every call of fakedomovethings() (the prediction of the local player's moves) is
 //                      checked: the raw bytes of every table of the simulation are hashed before and after
@@ -76,6 +84,10 @@ void TestPredictArg(void);
 void TestMenuArg(void);
 void TestSaveArg(int tic);
 void TestLateArg(const char *arg);      // "<T>,<ms>"
+void TestLagArg(const char *name);
+void TestSlowStartArg(int ms);
+void TestNewGameArg(int tic);           // -testnewgame<T>
+void TestNewGamePoll(void);             // the main loop, before moveloop()
 void TestDrawCheckArg(void);
 void TestNoDrawArg(void);
 void TestCamArg(const char *arg);       // "<T>,<n>"
@@ -86,6 +98,18 @@ void TestDrawEnd(const char *what);
 void TestPredictBegin(void);    // fakedomovethings(), at its start and its end (-testpredict)
 void TestPredictEnd(void);
 void TestStateArg(int tic);     // -teststate[<T>]: with -testdump, also <name>.state, the state as text (tics 1, 2 and T)
+
+// -testlag (brief 04b). All are no-ops until -testlag is given (check TestLagOn first in the hot paths).
+extern int TestLagOn;
+void TestLagPassStart(void);            // getpackets() begins
+void TestLagFlushing(int on);           // SendInputNow() flushes (1) or has flushed (0)
+void TestLagMade(int idx, int copy);    // this machine made its own input number idx (copy: repeats the one before it, movesperpacket > 1)
+void TestLagTag(int idx);               // the next packet handed to mmulti carries fifo index idx (-1: none)
+void TestLagScan(void);                 // getpackets() stored a packet: stamp the inputs that arrived
+void TestLagForward(int idx);           // the master hands the combined packet for fifo index idx to sendpacket()
+void TestLagCorrect(int clockticks);    // totalclock was moved by this many clock ticks (the lag correction)
+void TestLagReport(void);               // -testquit: the last records and the datagram counts
+void TestLevelStarted(void);            // resettimevars(): a level has started (-testslowstart waits here)
 
 // Called every frame from displayrest() (-testmenu): prints "TEST: menu N" when the menu in a game changes
 // (N is current_menu while MODE_MENU is set, -1 when the game is not in a menu).

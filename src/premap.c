@@ -27,6 +27,7 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 
 #include "duke3d.h"
 #include "netgame.h"
+#include "testhooks.h"
 
 extern unsigned char pow2char[];
 
@@ -1247,6 +1248,7 @@ void resettimevars(void)
     ototalclock = 0L;
     lockclock = 0L;
     ready2send = 1;
+    TestLevelStarted();     // test-only: -testslowstart
 }
 
 
@@ -1291,6 +1293,7 @@ void waitforeverybody()
     int i;
 
     if (numplayers < 2) { waitingfornewlevel = 0; return; }
+    inbarrier++;        // 04b: getpackets() below must not forward tics (game.c), whatever ready2send is
     packbuf[0] = 250;
     for(i=connecthead;i>=0;i=connectpoint2[i])
     {
@@ -1313,7 +1316,7 @@ void waitforeverybody()
             if (playerreadyflag[i] < playerreadyflag[myconnectindex]) break;
             if ((!networkmode) && (myconnectindex != connecthead)) { i = -1; break; } //slaves in M/S mode only wait for master
         }
-        if (i < 0) { waitingfornewlevel = 0; return; }
+        if (i < 0) { waitingfornewlevel = 0; inbarrier--; return; }
     }
 }
 
