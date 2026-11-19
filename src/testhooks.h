@@ -55,7 +55,7 @@ void TestDumpArg(const char *name);
 void TestExitArg(int tic);
 void TestStallArg(const char *arg);
 void TestFireArg(int tic);
-void TestArmArg(void);          // -testarm: every weapon with full ammo, and full health, in every tic (D15's demos)
+void TestArmArg(void);          // -testarm: every weapon with full ammo, and full health, in every tic (D15's demos); in the version byte
 void TestPredictArg(void);
 void TestMenuArg(void);
 void TestPredictBegin(void);    // fakedomovethings(), at its start and its end (-testpredict)
@@ -73,7 +73,8 @@ void TestInputHook(void);
 // after tic T, with the inputs of K more tics here".
 void TestLevelEnd(void);
 
-// Added to the version byte of packet 6 (0 without -testsync).
+// Added to the version byte of packet 6: 8 for -testsync, 16 for -testexit, 32 for -testfire, 64 for -testarm
+// (0 without them), so that machines started with different ones refuse each other.
 int TestVersionSalt(void);
 
 // domovethings(), when a tic is going to run: the state before it is hashed (and written with

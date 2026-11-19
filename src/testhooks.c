@@ -21,12 +21,13 @@ void TestSyncArg(void)         { TestSyncOn = 1; }
 void TestQuitArg(int tics)     { TestQuitTics = tics; }
 void TestNudgeArg(int tic)     { TestNudgeTic = tic; }
 
-// Added to the version byte of packet 6: only -testsync changes what is on the wire, so only it
-// needs every player to agree. (jfSW also adds the quit tic; there a mismatch is only a log line,
-// here a mismatch ends the game with a message, and a different -testquit is harmless to the game.)
+// Added to the version byte of packet 6: -testsync changes what is on the wire; -testexit, -testfire and -testarm
+// change the simulation (every player must have them, or the game desyncs), so players that differ are refused.
+// (jfSW also adds the quit tic; there a mismatch is only a log line, here a mismatch ends the game with a message,
+// and a different -testquit is harmless to the game.)
 int TestVersionSalt(void)
 {
-    return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0);
+    return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0) + (TestArmOn ? 64 : 0);
 }
 
 int TestSyncTic(int index)
