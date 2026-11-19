@@ -1311,7 +1311,7 @@ SCENARIOS.newgame = {
   run: async () => {
     const lat = (n) => (i) => (i > 0 ? 'lat=' + n + ',seed=' + (301 + i) : null);
     await newGameGame('master, 250 ms', ['native', 'native'], { who: 0, impair: lat(250) });
-    await newGameGame('master, 600 ms', ['native', 'native'], { who: 0, tics: 120, impair: lat(600) });     // (a short game: at this latency the lag correction falls behind in the end, as in the original game)
+    await newGameGame('master, 700 ms', ['native', 'native'], { who: 0, tics: 60, impair: lat(700) });     // (a short game: at this latency the lag correction falls behind in the end, as in the original game)
     await newGameGame('master, 100 ms jitter', ['native', 'native'], { who: 0, impair: (i) => (i > 0 ? 'lat=100,jit=100,seed=' + (311 + i) : null) });
     await newGameGame('slave, 150 ms', ['native', 'native'], { who: 1, impair: lat(150) });
     await newGameGame('three, master, 200 ms', ['native', 'native', 'native'], { who: 0, impair: lat(200) });
