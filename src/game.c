@@ -446,6 +446,21 @@ void adduserquote(char *daquote)
 }
 
 
+// Brief 04b: this machine's input (a slave's packet 1, peer-to-peer packets 16 and 17) or the master's
+// combined packet 0 goes on the wire when it is made, not at the next dosendpackets() after mmulti's 25 ms
+// send window (PAKRATE) has passed. getpackets(), which faketimerhandler() calls before it makes the
+// input, can already have spent the window on a datagram with only acknowledgements, and then the input
+// waited up to 25 ms (a native machine) or a browser frame or two (16 to 33 ms). This changes when a
+// datagram goes, not what is in it. mmulti_vnet_flush() (jfbuild mmulti.c) is not specific to vnet: it
+// sends whatever sendpacket() has queued, to plain UDP peers as well. Datagrams that carry only
+// acknowledgements or resends still go at most once per window.
+static void SendInputNow(void)
+{
+    if (TestLagOn) TestLagFlushing(1);      // test-only: -testlag
+    mmulti_vnet_flush();
+    if (TestLagOn) TestLagFlushing(0);
+}
+
 void getpackets(void)
 {
     int i, j, k, l;
@@ -937,6 +952,7 @@ void faketimerhandler()
             if (i != myconnectindex)
                 sendpacket(i,packbuf,j);
         if (TestLagOn) TestLagTag(-1);
+        SendInputNow();
 
         return;
     }
@@ -999,6 +1015,7 @@ void faketimerhandler()
         if (TestLagOn) TestLagTag(movefifoend[myconnectindex]-1);   // test-only: -testlag
         sendpacket(connecthead,packbuf,j);
         if (TestLagOn) TestLagTag(-1);
+        SendInputNow();
         return;
     }
 
@@ -1019,12 +1036,17 @@ void faketimerhandler()
 void sendmasterpackets(int upto)
 {
     int i, j, k;
+    int sent = 0;
     input *osyn, *nsyn;
 
     while (movefifosendplc < upto)  //Master
     {
         for(i=connecthead;i>=0;i=connectpoint2[i])
-            if (playerquitflag[i] && (movefifoend[i] <= movefifosendplc)) return;
+            if (playerquitflag[i] && (movefifoend[i] <= movefifosendplc))
+            {
+                if (sent) SendInputNow();       // (04b) what was queued goes out now
+                return;
+            }
 
         osyn = (input *)&inputfifo[(movefifosendplc-1)&(MOVEFIFOSIZ-1)][0];
         nsyn = (input *)&inputfifo[(movefifosendplc  )&(MOVEFIFOSIZ-1)][0];
@@ -1098,7 +1120,9 @@ void sendmasterpackets(int upto)
         if (TestLagOn) TestLagTag(-1);
 
         movefifosendplc += movesperpacket;
+        sent = 1;
     }
+    if (sent) SendInputNow();
 }
 
 extern int cacnum;

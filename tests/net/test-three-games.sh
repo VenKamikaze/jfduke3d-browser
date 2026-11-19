@@ -26,6 +26,8 @@
 #   --nosound N      A1: process N (0 = host) runs with sound off (-ns) while the others have it: a game that
 #                    played a sound (or not) must not play differently (jfSW's L27 pattern: sound-gated
 #                    random numbers; code-facts.md 17)
+#   --mpp N          04b: movesperpacket N (1, 2 or 4: -f2 / -f4 on every machine; the master and the slaves
+#                    then exchange one packet per N tics)
 #   --fire           A1: every player holds fire and walks about from tic 100 (-testfire), so that shots,
 #                    hits and kills make sounds
 #
@@ -41,7 +43,7 @@
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-mode=relay; tics=900; players=3; game="$root/duke3d"; impair=""; nudge=""; testsync="-testsync"; nosound=""; fire=""
+mode=relay; tics=900; players=3; game="$root/duke3d"; impair=""; nudge=""; testsync="-testsync"; nosound=""; fire=""; mpp=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --relay) mode=relay; shift ;;
@@ -53,6 +55,7 @@ while [ $# -gt 0 ]; do
         --nudge) nudge="$2"; shift 2 ;;
         --no-testsync) testsync=""; shift ;;
         --nosound) nosound="$2"; shift 2 ;;
+        --mpp) mpp="-f$2"; shift 2 ;;
         --fire) fire="-testfire100"; shift ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
@@ -61,11 +64,11 @@ t_need_data
 
 rport=$((port_base + 20))
 uport=$((port_base + 30))
-auto="-v1 -l1 -c2 $testsync -testquit$tics -testdumpd.bin $fire"
+auto="-v1 -l1 -c2 $testsync -testquit$tics -testdumpd.bin $fire $mpp"
 limit=$((tics / 20 + 60))      # seconds: a hang detector, generous for a loaded machine
 every=1; [ -z "$testsync" ] && every=8
 
-t_note "$players-player coop game, $tics tics, $mode${impair:+, impairment $impair}${nudge:+, nudge $nudge}${testsync:+, -testsync}${nosound:+, player $nosound without sound}${fire:+, firing and walking}"
+t_note "$players-player coop game, $tics tics, $mode${impair:+, impairment $impair}${nudge:+, nudge $nudge}${testsync:+, -testsync}${nosound:+, player $nosound without sound}${mpp:+, $mpp}${fire:+, firing and walking}"
 
 game_args() {   # player index -> args after "--"
     local n="$1" a="$auto"
