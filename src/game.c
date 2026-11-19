@@ -806,6 +806,21 @@ void getpackets(void)
         }
         if (TestLagOn) TestLagScan();       // test-only: -testlag
     }
+
+    // Brief 04b: a slave's input may have been the last one missing for a tic. The master passes that tic
+    // on now, not when it next makes an input of its own (its next timer tick, up to a tic later). This is
+    // after the receive loop on purpose: packbuf is the receive buffer and sendmasterpackets() builds
+    // its packets in it, so it must not run while a datagram is still being read from it. The same
+    // function, the same inputs and the same order of tics as faketimerhandler() sends; the bytes that
+    // depend on when the master sends follow its timing, as they always did: the lag-correction bytes of
+    // every TIMERUPDATESIZ-th tic (each slave's myminlag so far) and which of the master's pending sync
+    // bytes go in which packet. The condition is faketimerhandler()'s own: a master that is allowed to
+    // send (ready2send is 0 from the end of a level until the next one has started: D5, D6, D11), and
+    // sendmasterpackets() sends a tic only when every player's input for it is here, including the
+    // master's, so a barrier after clearfifo() (an empty queue of its own) sends nothing, and a batch
+    // of movesperpacket tics always goes whole.
+    if (networkmode == 0 && myconnectindex == connecthead && ready2send)
+        sendmasterpackets(0x7fffffff);
 }
 
 extern void computergetinput(int snum, input *syn);
