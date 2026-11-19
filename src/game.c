@@ -535,6 +535,13 @@ void getpackets(void)
 
                 break;
             case 1:  //[1] (receive slave sync buffer)
+                    // An input that a slave made in the level we have just left (it made it a tic or two ahead
+                    // of the tic it was playing, and sent it late): the slave has not been through the barrier
+                    // of the new level yet (its ready packet, which follows, has not come), and the packet
+                    // carries no tic number, so it would be taken for the slave's input of the new level's
+                    // first tic. Drop it.
+                if (playerreadyflag[other] < playerreadyflag[myconnectindex]) break;
+
                 j = 2; k = packbuf[1];
 
                 osyn = (input *)&inputfifo[(movefifoend[other]-1)&(MOVEFIFOSIZ-1)][0];
