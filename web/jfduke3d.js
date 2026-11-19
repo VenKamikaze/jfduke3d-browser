@@ -233,13 +233,17 @@
     else { console.warn('page error (not from the game):', describe(e)); }
   });
   window.addEventListener('unhandledrejection', function (e) {
-    if (gameError(e.reason)) { finish('Something went wrong: ' + sentence(describe(e)) + ' Reload the page to try again.', true, true); return; }
     // (jfSW's brief 06b) closing a WebTransport session (vnet's relay_wt.c, at the game's exit) while the datagram writer still has
     // writes in flight makes Chromium reject a promise of its own with "The session is closed." Harmless: noted, not reported.
+    // It is checked before gameError(): its stack is the game's (vnet_wt_close is compiled into duke3d.js) and it can arrive
+    // before the game's onExit has run, when gameError() would call it a failure of the game and end the page with an error
+    // message (brief 04: the browser games over WebTransport did, in about two games in three).
     var r = e.reason;
     var wt = r && (r.name === 'WebTransportError' || (typeof WebTransportError !== 'undefined' && r instanceof WebTransportError));
+    if (wt) { e.preventDefault(); console.info('expected rejection (a closed WebTransport session):', describe(e)); return; }
+    if (gameError(e.reason)) { finish('Something went wrong: ' + sentence(describe(e)) + ' Reload the page to try again.', true, true); return; }
     var lateDom = exitedAt > 0 && typeof DOMException !== 'undefined' && r instanceof DOMException;
-    if (wt || lateDom) { e.preventDefault(); console.info('expected rejection (' + (wt ? 'a closed WebTransport session' : 'after the game ended') + '):', describe(e)); return; }
+    if (lateDom) { e.preventDefault(); console.info('expected rejection (after the game ended):', describe(e)); return; }
     console.warn('unhandled rejection (not from the game):', describe(e));
   });
 

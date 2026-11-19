@@ -141,7 +141,7 @@ async function browserMachine(name, args, o) {
   const context = await e.browser.newContext({ viewport: o.viewport || { width: 700, height: 560 } });
   const page = await context.newPage();
   const errors = [];
-  page.on('pageerror', (er) => errors.push('pageerror: ' + er.message));
+  page.on('pageerror', (er) => errors.push('pageerror: ' + er.message + ' [' + String(er.stack || er.name || '').split('\n').slice(0, 4).join(' | ') + ']'));
   page.on('dialog', (d) => { errors.push('dialog: ' + d.message()); d.dismiss().catch(() => {}); });
   const q = o.raw !== undefined ? o.raw : '?test=1&persist=0&args=' + encodeURIComponent(args.join(' ')) + (o.query || '');
   await page.goto(e.base + q);
@@ -264,6 +264,11 @@ async function checkGame(ms, tics, opts) {
     }
     check(!/different versions/.test(out), m.name + ' saw no version mismatch');
     check(m.errors.length === 0, m.name + ' had no page errors', m.errors.join('; '));
+    if (m.kind === 'browser') {
+      // the page says the game ended, not that something went wrong (a closed WebTransport session at the exit used to say so)
+      const st = await m.status();
+      check(/game has ended/i.test(st), m.name + '\'s page says the game has ended (' + st.replace(/\s+/g, ' ').slice(0, 80) + ')');
+    }
     dumps.push(await m.readDump());
   }
   // NETPLAY_FLIP=1: a negative control for the comparison itself: one byte of the second machine's record 600 is flipped
@@ -627,7 +632,7 @@ async function hiddenRoom(kinds, hiddenIndex, opts) {
     const ms = await room(relay, kinds, { tics: opts.tics || HIDDEN_TICS, query: opts.wakeEvery ? (i) => (i === hiddenIndex ? '&wake_every=' + opts.wakeEvery : '') : null });
     const h = ms[hiddenIndex];
     let hideTic = -1, tHide = 0, hidden = false, framesAtHide = 0, hiddenLogAtHide = 0, froze = false, fp = null;
-    let owedAtHide = 0, owedAtTo = -1, logAtTo = 0;
+    let owedAtHide = 0, owedAtTo = -1, logAtTo = 0, tFrozen = 0;
     const series = await sample(ms, opts.tics || HIDDEN_TICS, HIDDEN_TICS / NOMINAL * 1000 * 2.5 + 40000, async (t, ser) => {
       const tics = ser[hiddenIndex][ser[hiddenIndex].length - 1][1];
       if (!hidden && tics >= 100 && h.kind === 'browser') {
@@ -647,6 +652,7 @@ async function hiddenRoom(kinds, hiddenIndex, opts) {
       }
       if (opts.freeze && hidden && !froze && tics >= 300) {
         froze = true;
+        tFrozen = t;
         console.log('  freezing the hidden ' + h.name + ' for ' + opts.freeze + ' ms at tic ' + tics);
         fp = freeze(h.page, opts.freeze);      // not awaited: the others are watched meanwhile
       }
@@ -676,7 +682,12 @@ async function hiddenRoom(kinds, hiddenIndex, opts) {
       const late = (t1 - t0) / 1000 - (1400 - 300) / NOMINAL;
       console.log('  the visible machine took ' + ((t1 - t0) / 1000).toFixed(1) + ' s for tics 300 to 1400 (' + ((1400 - 300) / NOMINAL).toFixed(1) + ' s at the nominal rate): late by ' + late.toFixed(1) + ' s, after a ' + opts.freeze / 1000 + ' s stall');
       check(late < opts.freeze / 1000 - 1, 'the room made up most of the stall (late by ' + late.toFixed(1) + ' s, not the whole ' + opts.freeze / 1000 + ' s)', late.toFixed(1));
-      check(late > 0.2, 'and the stall really delayed it (late by ' + late.toFixed(1) + ' s)');
+      // the freeze really held the room up: the visible machine could not move on without the frozen player's inputs while it lasted
+      // (how late the room ends up depends on how fast the frozen tab catches up: 0 to 1 s in these runs)
+      const at = (ser, ms_) => { let c = 0; for (const [tt, n] of ser) { if (tt <= ms_) { c = n; } } return c; };
+      const adv = at(v, tFrozen + opts.freeze) - at(v, tFrozen);
+      console.log('  the visible machine moved ' + adv + ' tics in the ' + opts.freeze / 1000 + ' s the hidden tab was frozen (nominal ' + (NOMINAL * opts.freeze / 1000) + ')');
+      check(adv < 0.5 * NOMINAL * opts.freeze / 1000, 'and the freeze really held the room up (the visible machine moved ' + adv + ' tics in ' + opts.freeze / 1000 + ' s, not ' + NOMINAL * opts.freeze / 1000 + ')');
     }
     if (wakes) {
       console.log('  hidden tab: ' + wakes.wakes + ' wake-ups, ' + wakes.log + ' hidden yields (resumed by: ' + JSON.stringify(wakes.reasons) + ': 1 network event, 0 timer), ' + wakes.frames + ' pictures asked for in all (' + framesAtHide + ' when it was hidden)');
