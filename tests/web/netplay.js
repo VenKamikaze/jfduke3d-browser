@@ -861,7 +861,7 @@ SCENARIOS['relay-lost'] = {
 };
 
 // Desync detection works: -testnudge on one machine makes the sync check log GAME OUT OF SYNC, and the dumps differ from
-// that tic on (the nudge moves that player 8 units at tic NUDGE; its record of tic NUDGE+1 is the first to differ). Every
+// that tic on (the nudge moves that player 8 units at tic NUDGE, before the record of that tic is made, so the record of tic NUDGE is the first to differ). Every
 // machine compares (code-facts section 2.5): the master each slave's byte against its own, a slave its own against the master's.
 const NUDGE = 300;
 async function nudgeRoom(nudgedIndex) {
@@ -878,7 +878,7 @@ async function nudgeRoom(nudgedIndex) {
       check(logged > 0, m.name + ' logged GAME OUT OF SYNC (' + logged + ' lines): ' + (out.match(/GAME OUT OF SYNC[^\n]*/) || ['(none)'])[0]);
     }
     const d = firstDifference(dumps);
-    check(!!d && d.tic >= NUDGE + 1 && d.tic <= NUDGE + 3, 'the dumps first differ at tic ' + (d ? d.tic : 'never') + ' (the nudge was at ' + NUDGE + ')', d ? d.what : '');
+    check(!!d && d.tic >= NUDGE && d.tic <= NUDGE + 2, 'the dumps first differ at tic ' + (d ? d.tic : 'never') + ' (the nudge was at ' + NUDGE + '; a record is the state before the tic, after that tic\'s nudge)', d ? d.what : '');
     if (d) {
       const n = Math.min(dumps[0].length, dumps[1].length) / REC;
       let differ = 0;
