@@ -1289,7 +1289,7 @@ void waitforeverybody()
 {
     int i;
 
-    if (numplayers < 2) return;
+    if (numplayers < 2) { waitingfornewlevel = 0; return; }
     packbuf[0] = 250;
     for(i=connecthead;i>=0;i=connectpoint2[i])
     {
@@ -1311,7 +1311,7 @@ void waitforeverybody()
             if (playerreadyflag[i] < playerreadyflag[myconnectindex]) break;
             if ((!networkmode) && (myconnectindex != connecthead)) { i = -1; break; } //slaves in M/S mode only wait for master
         }
-        if (i < 0) return;
+        if (i < 0) { waitingfornewlevel = 0; return; }
     }
 }
 
@@ -1370,6 +1370,7 @@ void dofrontscreens(const char *statustext)
 
 void clearfifo(void)
 {
+    waitingfornewlevel = 1;     // until the barrier that follows (waitforeverybody()), the others' inputs of the old level are stale
     syncvaltail = 0L;
     syncvaltottail = 0L;
     syncstat = 0;
