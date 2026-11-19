@@ -1328,8 +1328,8 @@ SCENARIOS['lag-highlat'] = {
   what: '500 ms on the slave\'s datagrams: 350 tics, both machines play them all and agree',
   run: async () => {
     const lat = (n) => (i) => (i > 0 ? 'lat=' + n + ',seed=' + (321 + i) : null);
-    await bounded('lat500', ['native', 'native'], { tics: 350, impair: lat(500) });
-    await bounded('lat400-browser', ['native', 'browser'], { tics: 350, impair: lat(400) });
+    await bounded('lat500', ['native', 'native'], { tics: 350, impair: lat(500), extra: () => ['-testfire1'] });     // (the players fire and walk about: their inputs change every few tics, so the packets are bigger)
+    await bounded('lat400-browser', ['native', 'browser'], { tics: 350, impair: lat(400), extra: () => ['-testfire1'] });
   },
 };
 
