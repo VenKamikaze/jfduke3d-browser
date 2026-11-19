@@ -190,3 +190,9 @@ Written when the coordinator asked to save progress. The Outcome above still has
 
 **Local-only files.** Logs and mutation driver in `/home/user/d04-logs/`; scratch in `/tmp/d04scratch/` (disposable). Worktrees `/home/user/wt-d04` and `/home/user/wt-d04-fix1` (removed after this push).
 
+### Update after the resume (19 Nov 2026, tip below)
+
+Worktree `/home/user/wt-d04` recreated from origin (kept; data, native and wasm rebuilt, no source change since `143077c`). Full `netplay.js` re-run in chunks on the final code (logs in `/home/user/d04-logs/c1..c3.log`): ws, ws3, browser-host, native-host, mixed3, impaired **178 passed, 0 failed**; wt, hidden-slave, hidden-host, hidden-thin, hidden-frozen, hidden-local **151/0**; level-exit, hidden-level, draw-state **239/0**. A fourth chunk (frozen-slave, frozen-host, relay-lost, nudge-slave, nudge-master) was stopped unfinished.
+
+**Still to do:** run `errors gate knobs long` and the stopped chunk (`/tmp/np-chunk.sh LOG scenario...` runs scenarios under flock; recreate it from the `flock ... node tests/web/netplay.js` command in the checklist), then `node tests/web/smoke.js` and `focus.js`; re-run `make test GAME_RUNS=1` and the other `tests/web` tests only if wanted (they passed on `694aa06`; later commits changed only the page's WebTransport handler and tests); fill the Outcome placeholders `@@SHAS@@`, `@@NSCEN@@` (24), `@@RESULTS@@`, `@@MUTATIONS@@` from the section above.
+
