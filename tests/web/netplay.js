@@ -274,7 +274,21 @@ async function checkGame(ms, tics, opts) {
   }
   // NETPLAY_FLIP=1: a negative control for the comparison itself: one byte of the second machine's record 600 is flipped
   if (process.env.NETPLAY_FLIP && dumps[1] && dumps[1].length > 601 * REC) { dumps[1] = Buffer.from(dumps[1]); dumps[1][600 * REC + 10] ^= 1; }
-  if (!opts.desyncExpected) { await compareDumps(ms, dumps, tics); }
+  if (opts.lastLevelOnly) {
+    // a new game started in the middle of the first level: the machines played different numbers of tics of the old level, so
+    // only what follows each machine's last "tic 1" is compared (record for record, byte for byte)
+    const tails = dumps.map((d) => { let k = -1; for (let i = 0; d && i * REC < d.length; i++) { if (d.readUInt32LE(i * REC) === 1) { k = i; } } return { k, d }; });
+    check(tails.every((t) => t.k > 0), 'every machine started a second game (its dump has a second tic 1: record ' + tails.map((t) => t.k).join(', ') + ')');
+    if (tails.every((t) => t.k > 0)) {
+      const t0 = tails[0].d.subarray(tails[0].k * REC);
+      for (let q = 1; q < tails.length; q++) {
+        const tq = tails[q].d.subarray(tails[q].k * REC);
+        let diff = -1;
+        for (let i = 0; i < Math.min(t0.length, tq.length) / REC; i++) { if (!t0.subarray(i * REC, (i + 1) * REC).equals(tq.subarray(i * REC, (i + 1) * REC))) { diff = i; break; } }
+        check(diff < 0 && t0.length === tq.length && t0.length / REC >= tics, ms[0].name + ' and ' + ms[q].name + ' agree on every tic of the new game (' + t0.length / REC + ' and ' + tq.length / REC + ' tics' + (diff >= 0 ? '; first difference at tic ' + (diff + 1) : '') + ')');
+      }
+    }
+  } else if (!opts.desyncExpected) { await compareDumps(ms, dumps, tics); }
   return dumps;
 }
 
@@ -1270,6 +1284,51 @@ SCENARIOS['lag-batch'] = {
     g = await lagGame('natives-f4-30ms', ['native', 'native'], { extra: () => ['-f4'], impair: LAT30 });
     lagChecks('natives-f4-30ms', g);
     await lagGame('native-host-f2-impaired', ['native', 'browser'], { extra: () => ['-f2'], impair: IMPAIR });      // agreement only: loss makes the delays meaningless
+  },
+};
+
+// ---- the 04b fix round ---------------------------------------------------------------------------------------
+// A new game started in the middle of a game (the menu's "start game", packet 5; -testnewgame<T> does what the menu does):
+// newgame() runs waitforeverybody() with the slaves' inputs of the running game still on their way. The master must not
+// forward a tic from inside that barrier (a packet 0 that leaves after the master's ready packet and reaches the slave after the
+// slave has cleared its queues would be taken for a tic of the new level: packet 0 carries no tic number, and only packet 1
+// has the waitingfornewlevel guard): `inbarrier`, game.c getpackets(). Latency makes the window wide: the slave's inputs that are
+// in flight arrive during the master's barrier.
+async function newGameGame(label, kinds, o) {
+  const relay = await startRelay();
+  try {
+    console.log('  ' + label + ': ' + kinds.join(' + ') + ', machine ' + (o.who || 0) + ' starts a new game after ' + (o.at || 100) + ' tics (' + LOAD() + ')');
+    const tics = 250;
+    const ms = await room(relay, kinds, { tics, impair: o.impair, extra: (i) => ['-testfire150'].concat(i === (o.who || 0) ? ['-testnewgame' + (o.at || 100)] : []) });
+    for (const m of ms) { await m.waitEnd(tics / NOMINAL * 1000 * 3 + 120000 - (now() - ms[0].started)); }
+    await checkGame(ms, tics, { lastLevelOnly: true });
+    check(/TEST: starting a new game after \d+ tics/.test(await ms[o.who || 0].out()), ms[o.who || 0].name + ' started the new game');
+    return ms;
+  } finally { await cleanup(relay); }
+}
+SCENARIOS.newgame = {
+  what: 'a new game started in the middle of a game (packet 5, by the master and by a slave, with latency): every machine agrees on the new game',
+  run: async () => {
+    const lat = (n) => (i) => (i > 0 ? 'lat=' + n + ',seed=' + (301 + i) : null);
+    await newGameGame('master, 250 ms', ['native', 'native'], { who: 0, impair: lat(250) });
+    await newGameGame('master, 100 ms jitter', ['native', 'native'], { who: 0, impair: (i) => (i > 0 ? 'lat=100,jit=100,seed=' + (311 + i) : null) });
+    await newGameGame('slave, 150 ms', ['native', 'native'], { who: 1, impair: lat(150) });
+    await newGameGame('three, master, 200 ms', ['native', 'native', 'native'], { who: 0, impair: lat(200) });
+    await newGameGame('browser master, 150 ms', ['browser', 'native'], { who: 0, impair: lat(150) });
+  },
+};
+
+// 400 to 500 ms of latency on the slave's datagrams (a slave on the other side of the world): the game must play on (04b fix round).
+// Without the fix step 3 stalled the slave: the master sent a 127 nudge at every timer tick that had already forwarded its tic, one
+// more reliable packet per tic, which with the packets in flight filled mmulti's 256 byte datagram, so the newest tics were held
+// back until older ones were acknowledged; the slave's lag correction fell further and further behind and its game ended before
+// the master's last tics reached it. (The same limit exists in the original game, 350 tics later: mmulti.c MAXPAKSIZ.)
+SCENARIOS['lag-highlat'] = {
+  what: '500 ms on the slave\'s datagrams: 350 tics, both machines play them all and agree',
+  run: async () => {
+    const lat = (n) => (i) => (i > 0 ? 'lat=' + n + ',seed=' + (321 + i) : null);
+    await bounded('lat500', ['native', 'native'], { tics: 350, impair: lat(500) });
+    await bounded('lat400-browser', ['native', 'browser'], { tics: 350, impair: lat(400) });
   },
 };
 
