@@ -294,6 +294,7 @@ test-net: engine-current
 	tests/net/test-level-exit.sh
 	tests/net/test-predict-pure.sh
 	tests/net/test-nodraw.sh
+	tests/net/test-save.sh
 	tests/net/test-single.sh
 	@tests/net/test-menu-f4.sh; st=$$?; if [ $$st -eq 3 ]; then echo '*** test-menu-f4.sh: NOT RUN (not counted as passed; see its message above)'; elif [ $$st -ne 0 ]; then exit $$st; fi
 	tests/net/test-udp-unchanged.sh --base-game "$$(tests/net/build-baseline.sh)"
