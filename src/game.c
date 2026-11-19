@@ -446,6 +446,8 @@ void adduserquote(char *daquote)
 }
 
 
+static int masterfwdsincetick;     // the master has sent a tic since its last timer tick (the 127 nudge, faketimerhandler())
+
 // Brief 04b: this machine's input (a slave's packet 1, peer-to-peer packets 16 and 17) or the master's
 // combined packet 0 goes on the wire when it is made, not at the next dosendpackets() after mmulti's 25 ms
 // send window (PAKRATE) has passed. getpackets(), which faketimerhandler() calls before it makes the
@@ -1035,16 +1037,26 @@ void faketimerhandler()
     }
 
           //This allows packet resends
+          // Brief 04b: a tick at which the master has already passed a tic on (getpackets() does it as soon
+          // as the last input is in) is a tick at which, before 04b, it would have sent that tic and no nudge:
+          // the nudge is only for a tick that sent nothing. Without this each such tick sent a nudge as well,
+          // one more reliable packet per tic, and at 400 ms of latency and more (the packets in flight
+          // fill mmulti's 256 byte datagram) the slave fell behind (04b-lag-cuts.md, Outcome, fix round).
     for(i=connecthead;i>=0;i=connectpoint2[i])
         if (movefifoend[i] <= movefifosendplc)
         {
-            packbuf[0] = 127;
-            for(i=connectpoint2[connecthead];i>=0;i=connectpoint2[i])
-               sendpacket(i,packbuf,1);
+            if (!masterfwdsincetick)
+            {
+                packbuf[0] = 127;
+                for(i=connectpoint2[connecthead];i>=0;i=connectpoint2[i])
+                   sendpacket(i,packbuf,1);
+            }
+            masterfwdsincetick = 0;
             return;
         }
 
     sendmasterpackets(0x7fffffff);
+    masterfwdsincetick = 0;
 }
 
      //Master: send the slaves the inputs of the tics before tic UPTO that every player has an input for
@@ -1136,6 +1148,7 @@ void sendmasterpackets(int upto)
 
         movefifosendplc += movesperpacket;
         sent = 1;
+        masterfwdsincetick = 1;
     }
     if (sent) SendInputNow();
 }
