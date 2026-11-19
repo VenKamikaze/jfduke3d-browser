@@ -291,7 +291,6 @@ function parseState(text) {
       cur = new Map();
       blocks.set(w[0] + ' L' + (lv ? lv[1] : '?'), cur);
       cur.set('header', new Map([['randomseed', (/randomseed=(-?\d+)/.exec(line) || [])[1]]]));
-      cur.frames = +((/frames=(-?\d+)/.exec(line) || [])[1]);     // frames drawn since the level started (differs per machine: not compared)
       continue;
     }
     if (!cur) { continue; }
@@ -1201,7 +1200,8 @@ SCENARIOS.tic1 = {
           for (const m of ms) { const b = await m.readFile('d.bin.state'); st.push(b ? parseState(b.toString()) : null); }
           check(st.every(Boolean), 'every machine wrote its state dump');
           if (!st.every(Boolean)) { continue; }
-          const frames = st.map((a) => a.get('t1 L1').frames);
+          const frames = [];
+          for (const m of ms) { frames.push(+((/TEST: frames drawn before tic 1 of level 1: (\d+)/.exec(await m.out()) || [])[1])); }     // (the log, not the state dump: the dumps are compared whole)
           games++;
           const ok = frames[slow] === 1 && frames[1 - slow] > 1;
           if (ok) { uneven++; }
@@ -1226,7 +1226,8 @@ SCENARIOS.tic1 = {
 // tic). The delay a player feels (input made to tic run) is checked only where it is steady: two native games with 30 ms each way;
 // in browser games it moves too much with the load to be a fair bound and is reported. The datagram rate per peer must stay
 // within twice the old ceiling (one datagram per peer per 25 ms, 40 a second).
-const LAG = { sendwait: 5, fwdP95: 8, fwdMed: 2, nativeSlave30: 85, rate: 80 };
+// nativeSlave30: two native games with 30 ms each way, the slave's delay at the median: 67.0 to 67.1 ms with both steps (3 runs), 81 to 100 ms with step 2 only, 110 to 134 ms before.
+const LAG = { sendwait: 5, fwdP95: 8, fwdMed: 2, nativeSlave30: 75, rate: 80 };
 function lagChecks(label, g, o) {
   g.stats.forEach((st, i) => {
     const who = label + ' ' + g.ms[i].name + ' (' + g.ms[i].kind + (i === 0 ? ' master' : ' slave') + ')';

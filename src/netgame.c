@@ -131,7 +131,10 @@ int NetHiddenTab(void)
 //   * mmulti puts at most one datagram per peer on the wire every 25 ms (PAKRATE), and
 //     getpackets(), which faketimerhandler() calls before it makes the input, can spend that
 //     window on an acknowledgement; the input would then wait for the next network event, which
-//     a hidden tab has no frame to replace. The pass ends with a flush (mmulti_vnet_flush()).
+//     a hidden tab has no frame to replace. Brief 04 ended the pass with a flush
+//     (mmulti_vnet_flush()); since brief 04b every tab flushes each input as it makes it
+//     (SendInputNow() in game.c) and the master flushes each tic it forwards, so the pass needs
+//     none (the four hidden scenarios pass without it: 04b-lag-cuts.md, Outcome).
 // A hidden single player game does not get here: it pauses in the yield, as in brief 02.
 void HiddenNetPass(void)
 {
@@ -140,5 +143,4 @@ void HiddenNetPass(void)
     for (n = 0; n < 8 && ready2send && totalclock >= ototalclock + TICSPERFRAME; n++)
         faketimerhandler();
     checksync();
-    mmulti_vnet_flush();
 }

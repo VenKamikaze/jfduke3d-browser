@@ -19,7 +19,7 @@ int TestNudgeTic = -1;
 static int TestExitTic;         // -testexit<T>; 0 = off
 static int TestFireOn, TestFireFrom;
 static int TestArmOn;           // -testarm
-static int TestFramesAtStart;   // numframes when the level started (TestLevelStarted(), -teststate says how many frames came before tic 1)
+static int TestFramesAtStart;   // numframes when the level started (TestLevelStarted(); a -testdump machine logs the frames drawn before tic 1)
 static int TestLevelNo;         // the number of the level being played: 1 for the first, counted at its tic 1
 static int TestCamTic, TestCamNum, TestMirrorTic, TestMirrorNum;     // -testcam<T>,<n>, -testmirror<T>,<n> (brief 04)
 int TestNoDrawOn;               // -testnodraw (brief 04)
@@ -382,7 +382,7 @@ static void TestStateTic(int tic)
             return;
         }
     }
-    fprintf(TestStateFile, "t%d randomseed=%d level=%d frames=%d\n", tic, randomseed, TestLevelNo, numframes - TestFramesAtStart);
+    fprintf(TestStateFile, "t%d randomseed=%d level=%d\n", tic, randomseed, TestLevelNo);
     stlast_part = -1; stlast_obj = -2;
     WalkState(TextEmit);
     if (stlast_part >= 0) fputc('\n', TestStateFile);
@@ -1183,7 +1183,7 @@ void TestLagReport(void)
 // before its first frame of it, so that it draws a single frame before the tic that follows, while the other
 // machines have drawn many: the uneven start that the tic 1 check needs, made certain. Per machine; it changes
 // nothing but when this machine starts. TestLevelStarted() also notes the frame count at that moment, so
-// the state dumps can say how many frames a machine drew before its tic 1.
+// that a -testdump machine can log how many frames it drew before its tic 1 ("TEST: frames drawn before tic 1 of level N: F").
 
 static int TestSlowStartMs;
 
@@ -1219,6 +1219,9 @@ void TestTicHook(void)
     if (tic == 1) TestLevelNo++;
     if (tic == 1 && TestLevelNo == 1 && (TestSyncOn || TestDumpName[0]))
         buildprintf("TEST: SoundToggle %d, AmbienceToggle %d\n", SoundToggle, AmbienceToggle);
+    // how many frames this machine drew between the start of its level and its tic 1 (the tic1 scenario: -testslowstart)
+    if (tic == 1 && TestDumpName[0])
+        buildprintf("TEST: frames drawn before tic 1 of level %d: %d\n", TestLevelNo, numframes - TestFramesAtStart);
 
     // a game started with -v1 -l1 gives co-op players no weapons (newgame() only does for a deathmatch;
     // a game started from the menu resets them with the new-game packet): give them the starting ones,
