@@ -68,4 +68,19 @@ run() {
 }
 
 for s in "${only[@]}"; do run "$s"; done
+
+# the test flags together would overflow the version byte of the player announcement (134 + 123 > 255): refused at once
+if [ ${#only[@]} -ge 3 ]; then
+    t_note "all the test flags at once"
+    fl="-v1 -l1 -c2 -testsync -testexit50 -testfire -testarm -testcam5,0 -testmirror5,0"
+    t_game f0 "$t_tmp/f0" --game "$game" --timeout 40 -- -net -relay "127.0.0.1:$rport" -host-room 2 -- $fl
+    h0=$game_pid
+    t_wait_for "$t_tmp/f0/duke3d.log" 'room code [A-Z0-9]{6}' 20
+    code="$(grep -o 'room code [A-Z0-9]*' "$t_tmp/f0/duke3d.log" | head -1 | awk '{print $3}')"
+    t_game f1 "$t_tmp/f1" --game "$game" --timeout 40 -- -net -relay "127.0.0.1:$rport" -room "$code" -- $fl
+    t_wait_pid "$game_pid" 50; s1=$t_status
+    t_wait_pid "$h0" 50; s0=$t_status
+    t_check "too many test flags: both exit with status 1 (got $s0 and $s1)" test "$s0" -eq 1 -a "$s1" -eq 1
+    t_check "too many test flags: the host says why (the joiner then loses it)" grep -q 'too many test options' "$t_tmp/f0.out"
+fi
 t_result

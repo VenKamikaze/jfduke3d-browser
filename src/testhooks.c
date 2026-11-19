@@ -28,7 +28,22 @@ void TestNudgeArg(int tic)     { TestNudgeTic = tic; }
 // differ are refused. (The byte is 134 on shareware data and the sum of all of them must stay under 122.)
 // (jfSW also adds the quit tic; there a mismatch is only a log line, here a mismatch ends the game with a message,
 // and a different -testquit is harmless to the game.)
+static int TestVersionSaltSum(void);
+
 int TestVersionSalt(void)
+{
+    int salt = TestVersionSaltSum();
+
+    // the version byte is a byte: with the shareware's 134 the flags may add up to 121 at most. All of them together make 123.
+    if (BYTEVERSION + salt > 255) {
+        buildprintf("TEST: too many test options at once: the version byte of the player announcement cannot carry them (%d + %d > 255)\n", BYTEVERSION, salt);
+        wm_msgbox("Test options", "Too many test options at once (-testsync, -testexit, -testfire, -testarm, -testcam, -testmirror).");
+        exit(1);
+    }
+    return salt;
+}
+
+static int TestVersionSaltSum(void)
 {
     return (TestSyncOn ? 8 : 0) + (TestExitTic > 0 ? 16 : 0) + (TestFireOn ? 32 : 0) + (TestArmOn ? 64 : 0) + (TestCamTic > 0 ? 1 : 0) + (TestMirrorTic > 0 ? 2 : 0);
 }

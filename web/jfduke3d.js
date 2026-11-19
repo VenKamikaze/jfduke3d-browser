@@ -240,7 +240,8 @@
     // message (brief 04: the browser games over WebTransport did, in about two games in three).
     var r = e.reason;
     var wt = r && (r.name === 'WebTransportError' || (typeof WebTransportError !== 'undefined' && r instanceof WebTransportError));
-    if (wt) { e.preventDefault(); console.info('expected rejection (a closed WebTransport session):', describe(e)); return; }
+    // only the one the page's own closing of the session makes (vnet_wt_close is on its stack), or one that comes after the exit
+    if (wt && (exitedAt > 0 || /vnet_wt_close/.test(r.stack || ''))) { e.preventDefault(); console.info('expected rejection (a closed WebTransport session):', describe(e)); return; }
     if (gameError(e.reason)) { finish('Something went wrong: ' + sentence(describe(e)) + ' Reload the page to try again.', true, true); return; }
     var lateDom = exitedAt > 0 && typeof DOMException !== 'undefined' && r instanceof DOMException;
     if (lateDom) { e.preventDefault(); console.info('expected rejection (after the game ended):', describe(e)); return; }
