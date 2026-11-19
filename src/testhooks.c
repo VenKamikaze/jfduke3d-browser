@@ -447,6 +447,7 @@ static void TestDumpTic(int tic)
 
 static int TestExitDone;
 static int TestStallTic, TestStallMs, TestStallDone;
+static int TestLateTic, TestLateMs, TestLateDone;      // -testlate<T>,<ms> (brief 04)
 
 void TestExitArg(int tic)  { TestExitTic = tic; }
 void TestFireArg(int tic)  { TestFireOn = 1; TestFireFrom = tic; }
@@ -460,30 +461,50 @@ void TestStallArg(const char *arg)
     TestStallMs = c ? atoi(c + 1) : 1000;
 }
 
-static void TestStall(void)
+static void TestWait(int ms)
 {
 #ifndef __EMSCRIPTEN__
     unsigned int t0;
 #endif
 
-    buildprintf("TEST: stalling for %d ms at tic %d\n", TestStallMs, movefifoplc + 1);
 #ifdef __EMSCRIPTEN__
-    emscripten_sleep(TestStallMs);
+    emscripten_sleep(ms);
 #else
     t0 = getticks();
-    while ((int)(getticks() - t0) < TestStallMs)
+    while ((int)(getticks() - t0) < ms)
         ;
 #endif
     // the clock as a timer interrupt would have kept it: faketimerhandler() then makes the inputs that fell due
     sampletimer();
 }
 
+static void TestStall(void)
+{
+    buildprintf("TEST: stalling for %d ms at tic %d\n", TestStallMs, movefifoplc + 1);
+    TestWait(TestStallMs);
+}
+
+void TestLateArg(const char *arg)
+{
+    const char *c = strchr(arg, ',');
+
+    TestLateTic = atoi(arg);
+    TestLateMs = c ? atoi(c + 1) : 1000;
+}
+
 void TestInputHook(void)
 {
     int n;
 
-    // -testcam / -testmirror: the monitor's use key, the mirror's RPG (the input being made is for game tic movefifoend + 1)
+    // -testlate: the input for tic T is made, and held back for a while before it is sent (the caller sends it when this returns)
     n = movefifoend[myconnectindex] + 1;
+    if (TestLateTic > 0 && !TestLateDone && TestLevelNo <= 1 && n == TestLateTic) {
+        TestLateDone = 1;
+        buildprintf("TEST: holding the input of tic %d for %d ms (this machine has played %d tics)\n", n, TestLateMs, movefifoplc);
+        TestWait(TestLateMs);
+    }
+
+    // -testcam / -testmirror: the monitor's use key, the mirror's RPG (the input being made is for game tic movefifoend + 1)
     if (TestLevelNo <= 1) {
         if (TestCamTic > 0 && n >= TestCamTic + 2 && n < TestCamTic + 6)
             loc.bits |= 1 << 29;

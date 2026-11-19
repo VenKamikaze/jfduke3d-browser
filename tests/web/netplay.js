@@ -594,12 +594,13 @@ async function levelExitGame(kinds, hiddenIdx, o) {
     return ms;
   } finally { await cleanup(relay); }
 }
+const EXIT_SLAVE = () => levelExitGame(['browser', 'native', 'browser'], undefined, { stall: { 2: '190,1500' } });
+const EXIT_MASTER = () => levelExitGame(['browser', 'native', 'browser'], undefined, { stall: { 0: '190,1500' }, impair: (i) => (i > 0 ? 'lat=200,seed=' + (31 + i) : null) });
+SCENARIOS['level-exit-slave'] = { manual: true, what: 'the first game of level-exit alone (a browser slave stopped at tic 190)', run: EXIT_SLAVE };
+SCENARIOS['level-exit-master'] = { manual: true, what: 'the second game of level-exit alone (the browser master stopped, late datagrams)', run: EXIT_MASTER };
 SCENARIOS['level-exit'] = {
   what: 'a level exit with browsers (A1\'s -testexit): a browser host, a native and a browser joiner leave E1L1 at tic 200 and play 300 tics of E1L2, a browser slave stopped for 1.5 s at tic 190 (D6), then the browser master stopped with late datagrams (D5); dumps and states agree',
-  run: async () => {
-    await levelExitGame(['browser', 'native', 'browser'], undefined, { stall: { 2: '190,1500' } });
-    await levelExitGame(['browser', 'native', 'browser'], undefined, { stall: { 0: '190,1500' }, impair: (i) => (i > 0 ? 'lat=200,seed=' + (31 + i) : null) });
-  },
+  run: async () => { await EXIT_SLAVE(); await EXIT_MASTER(); },
 };
 SCENARIOS['hidden-level'] = {
   what: 'a level exit with a browser slave hidden from the start: it draws nothing of either level, every machine agrees through the level change',
