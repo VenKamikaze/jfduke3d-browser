@@ -1210,6 +1210,56 @@ void TestLevelStarted(void)
 #endif
 }
 
+// ---- -testnewgame<T> (brief 04b fix round) ----------------------------------------------------------------
+//
+// This machine starts a new game (the same level again, packet 5) when it has played T tics of the first level: it
+// does what the menu's "start game" does (menues.c): resets every player's weapons and inventory, sends packet 5
+// to the others (a slave only to the master, which passes it on), then newgame() and enterlevel(). Everybody
+// else starts the new game when the packet reaches them, so the machines have played different numbers of tics of
+// the old level, and every machine's dump from its last "tic 1" on must be the same. The master that starts one
+// reaches newgame()'s waitforeverybody() with slaves' inputs of the running game still on their way, which is
+// what a step 3 forward in a barrier would have sent on after the master's ready packet. Per machine; changes
+// nothing without the argument. Use it with -testquit<N> (counted in tics of the new level).
+
+static int TestNewGameTic, TestNewGameDone;
+
+void TestNewGameArg(int tic) { TestNewGameTic = tic; }
+
+void TestNewGamePoll(void)
+{
+    unsigned char b[11];
+    int c;
+
+    if (TestNewGameTic <= 0 || TestNewGameDone || TestLevelNo != 1 || numplayers < 2 || movefifoplc < TestNewGameTic) return;
+    if (!(ps[myconnectindex].gm & MODE_GAME)) return;
+    TestNewGameDone = 1;
+    buildprintf("TEST: starting a new game after %d tics\n", movefifoplc);
+    b[0] = 5;
+    b[1] = ud.m_level_number;
+    b[2] = ud.m_volume_number;
+    b[3] = ud.m_player_skill + 1;
+    ud.m_respawn_monsters = (ud.m_player_skill == 3);
+    ud.m_respawn_items = (ud.m_coop == 0);
+    ud.m_respawn_inventory = 1;
+    b[4] = ud.m_monsters_off;
+    b[5] = ud.m_respawn_monsters;
+    b[6] = ud.m_respawn_items;
+    b[7] = ud.m_respawn_inventory;
+    b[8] = ud.m_coop;
+    b[9] = ud.m_marker;
+    b[10] = ud.m_ffire;
+    for (c = connecthead; c >= 0; c = connectpoint2[c]) {
+        resetweapons(c);
+        resetinventory(c);
+    }
+    for (c = connecthead; c >= 0; c = connectpoint2[c]) {
+        if (c != myconnectindex) sendpacket(c, b, 11);
+        if ((!networkmode) && (myconnectindex != connecthead)) break;      // slaves in M/S mode only send to master
+    }
+    newgame(ud.m_volume_number, ud.m_level_number, ud.m_player_skill + 1);
+    if (enterlevel(MODE_GAME)) backtomenu();
+}
+
 // ---- The hooks in domovethings() ---------------------------------------------------------------
 
 void TestTicHook(void)

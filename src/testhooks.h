@@ -42,6 +42,8 @@
 //                      corrections; and at -testquit the datagrams sent to each peer. Observation only (testhooks.c).
 //   -testslowstart<ms> (04b) this machine waits <ms> ms when its level has started, before its first frame: an uneven
 //                      start for the tic 1 check. Per machine; changes nothing but when this machine starts.
+//   -testnewgame<T>    (04b fix round) this machine starts a new game (packet 5, as the menu does) when it has played T tics
+//                      of the first level; the others follow when the packet reaches them. Per machine.
 //   -testmenu          (D3) "TEST: menu N" is printed whenever the menu of a game opens, changes or closes.
 //   -testpredict       (A1) every call of fakedomovethings() (the prediction of the local player's moves) is
 //                      checked: the raw bytes of every table of the simulation are hashed before and after
@@ -84,6 +86,8 @@ void TestSaveArg(int tic);
 void TestLateArg(const char *arg);      // "<T>,<ms>"
 void TestLagArg(const char *name);
 void TestSlowStartArg(int ms);
+void TestNewGameArg(int tic);           // -testnewgame<T>
+void TestNewGamePoll(void);             // the main loop, before moveloop()
 void TestDrawCheckArg(void);
 void TestNoDrawArg(void);
 void TestCamArg(const char *arg);       // "<T>,<n>"

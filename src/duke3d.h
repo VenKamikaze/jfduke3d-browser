@@ -432,6 +432,7 @@ extern int32 VoiceToggle,AmbienceToggle;
 extern SOUNDOWNER SoundOwner[NUM_SOUNDS][4];
 
 extern unsigned char playerreadyflag[MAXPLAYERS],playerquitflag[MAXPLAYERS];
+extern unsigned char inbarrier;
 extern unsigned char waitingfornewlevel;
 extern char sounds[NUM_SOUNDS][14];
 

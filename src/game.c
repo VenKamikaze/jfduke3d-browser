@@ -819,7 +819,7 @@ void getpackets(void)
     // sendmasterpackets() sends a tic only when every player's input for it is here, including the
     // master's, so a barrier after clearfifo() (an empty queue of its own) sends nothing, and a batch
     // of movesperpacket tics always goes whole.
-    if (networkmode == 0 && myconnectindex == connecthead && ready2send)
+    if (networkmode == 0 && myconnectindex == connecthead && ready2send && !inbarrier)
         sendmasterpackets(0x7fffffff);
 }
 
@@ -7120,6 +7120,9 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"testslowstart",13)) {
                     TestSlowStartArg(atoi(c+13));   // test-only: this machine waits before the first frame of its level (04b)
                 }
+                else if (!Bstrncasecmp(c,"testnewgame",11)) {
+                    TestNewGameArg(atoi(c+11));     // test-only: this machine starts a new game after T tics of the first level
+                }
                 else if (!Bstrncasecmp(c,"testsave",8)) {
                     TestSaveArg(atoi(c+8));     // test-only: this machine asks for a multiplayer save game at tic T
                 }
@@ -8242,6 +8245,8 @@ if (VOLUMEONE) {
 
         OSD_DispatchQueued();
         NetLostCheck();     // a relay session lost during the game ends it (L18)
+
+        TestNewGamePoll();      // test-only: -testnewgame
 
         if( ud.recstat == 2 || ud.multimode > 1 || ( ud.show_help == 0 && (ps[myconnectindex].gm&MODE_MENU) != MODE_MENU ) )
             if( ps[myconnectindex].gm&MODE_GAME )
