@@ -543,8 +543,10 @@ void getpackets(void)
                     // of the tic it was playing, and sent it late): the slave has not been through the barrier
                     // of the new level yet (its ready packet, which follows, has not come), and the packet
                     // carries no tic number, so it would be taken for the slave's input of the new level's
-                    // first tic. Drop it.
-                if (playerreadyflag[other] < playerreadyflag[myconnectindex]) break;
+                    // first tic. Drop it. Only in the barrier that follows clearfifo() (a new level, a loaded game):
+                    // the barriers of a saved game do not clear the queues, and the inputs in flight there are the
+                    // tics after the save.
+                if (waitingfornewlevel && playerreadyflag[other] < playerreadyflag[myconnectindex]) break;
 
                 j = 2; k = packbuf[1];
 
