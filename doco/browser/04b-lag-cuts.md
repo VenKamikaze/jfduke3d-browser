@@ -90,17 +90,15 @@ This is jfSW's brief 04b ([`doco/browser/04b-lag-cuts.md`](https://github.com/Ve
 
 ## State
 
-Updated after each step. **Started 19 Nov 2026.** Worktree `/home/user/wt-d04b` (branch `browser/04b-lag-cuts`, from `origin/claude` `6d8302e`); native and wasm builds in it work (`make -j4`, `EMSDK_DIR=~/.cache/jfsw-browser/emsdk scripts/build-wasm.sh`, test data copied to `testdata/`).
+Updated after each step. **Started 19 Nov 2026.** Worktree `/home/user/wt-d04b` (branch `browser/04b-lag-cuts`, from `origin/claude` `6d8302e`); native and wasm builds in it work (`make -j4`, `EMSDK_DIR=~/.cache/jfsw-browser/emsdk scripts/build-wasm.sh`, test data copied to `testdata/`). Variant builds for the before/after table are in `/home/user/d04b-variants/` (`before-`, `step2-`, `step3-` `duke3d` and `wasm`; `snap.sh NAME` copies the current build; they are not in git); logs of the measurement runs in `/home/user/d04b-logs/`.
 
-**Done:** the brief (this file).
+**Done:** the brief; step 1 (`-testlag`, `-testslowstart`, the `lag`, `lag-matrix`, `tic1`, `lag-batch` scenarios); step 2 (`SendInputNow()`); step 3 (`getpackets()` forwards); two `lag-matrix` runs of each variant (all agreed, 144 checks each); `lag` and `tic1` pass on the final code.
 
 **To do, in order:**
 
-1. `-testlag` and `-testslowstart` in `src/testhooks.c`, hooks in `src/game.c` (no behaviour change); build native and wasm. Commit, push.
-2. Port `lag`, `lag-matrix`, `tic1` to `tests/web/netplay.js`; measure the baseline: `flock /tmp/jfd-heavy-tests.lock node tests/web/netplay.js lag-matrix` (variant "before").
-3. Step 2 (`SendInputNow()`), build the "step 2 only" variant, measure; the hidden pass's flush by mutation.
-4. Step 3 (`getpackets()` calls `sendmasterpackets()`), measure; `-f2`/`-f4`.
-5. `tic1`, `test-level-exit.sh`, `test-save.sh`, all of `netplay.js`, `determinism.js`, `make test`, `make test-net`, `make test-web`.
-6. Mutations; docs (`code-facts.md` §21, `bugs.md`, `building.md`, README row); the Outcome.
+1. `lag-batch` (`-f2`, `-f4`) result; `test-three-games.sh --mpp 2|4`.
+2. Mutations (revert step 2, step 3, both; receive buffer as send buffer; `tic1` without `-testslowstart` and with a drawing-dependent write; the hidden pass's flush removed with the four hidden scenarios) and, if the flush is redundant, remove it.
+3. Regression: all of `netplay.js`, `tests/net/test-level-exit.sh`, `test-save.sh`, `make test`, `make test-net`, `make test-web`, `determinism.js`.
+4. Docs: `code-facts.md` §21, `bugs.md`, `building.md`, README row; the Outcome here.
 
 **Open problems:** none yet.

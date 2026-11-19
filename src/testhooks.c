@@ -5,7 +5,9 @@
 #include "testhooks.h"
 #include "netgame.h"
 #include "mmulti_vnet.h"
+#ifndef _WIN32
 #include <time.h>
+#endif
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -981,13 +983,27 @@ static unsigned int TestLagDgrams[16], TestLagDBytes[16], TestLagDFirst[16], Tes
 static unsigned int TestLagDFlushed[16], TestLagDPaced[16], TestLagDRedundant[16];
 static int TestLagInFlush, TestLagPass, TestLagPacedPass[16];
 
+#ifdef _WIN32
+// kernel32's high resolution counter, declared as windows.h declares it (BOOL WINAPI, LARGE_INTEGER *) so that
+// this file need not include windows.h. MSVC has no clock_gettime. (jfSW's review S1; not built with MSVC here.)
+union _LARGE_INTEGER;
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(union _LARGE_INTEGER *);
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(union _LARGE_INTEGER *);
+#endif
+
 static unsigned int TestLagNow(void)
 {
-    struct timespec ts;
     unsigned long long t;
-
+#ifdef _WIN32
+    long long c = 0, fr = 0;
+    QueryPerformanceCounter((union _LARGE_INTEGER *)&c);
+    QueryPerformanceFrequency((union _LARGE_INTEGER *)&fr);
+    t = fr > 0 ? (unsigned long long)(c / fr) * 1000000ull + (unsigned long long)(c % fr) * 1000000ull / (unsigned long long)fr : 0;
+#else
+    struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     t = (unsigned long long)ts.tv_sec * 1000000ull + ts.tv_nsec / 1000;
+#endif
     if (!TestLagBase) TestLagBase = t;
     return (unsigned int)(t - TestLagBase);
 }

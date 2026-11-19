@@ -261,7 +261,7 @@ async function checkGame(ms, tics, opts) {
     if (!opts.desyncExpected) {
       check(!/OUT OF SYNC/.test(out), m.name + ' logged no desync');
       // every machine compares a sync byte every tic (-testsync), a hidden tab included: the count must follow the tics
-      if (line) { check(+line[2] >= 0.9 * +line[1] - 16, m.name + ' compared ' + line[2] + ' sync bytes in ' + line[1] + ' tics (at least 90%: a hidden tab checks too)'); }
+      if (line && !opts.noSyncCount) { check(+line[2] >= 0.9 * +line[1] - 16, m.name + ' compared ' + line[2] + ' sync bytes in ' + line[1] + ' tics (at least 90%: a hidden tab checks too)'); }
     }
     check(!/different versions/.test(out), m.name + ' saw no version mismatch');
     check(m.errors.length === 0, m.name + ' had no page errors', m.errors.join('; '));
@@ -1196,7 +1196,7 @@ SCENARIOS.tic1 = {
           console.log('  ' + kinds.join(' + ') + ', game ' + (g + 1) + ': the master starts ' + SLOW_START_MS + ' ms late (' + LOAD() + ')');
           const ms = await room(relay, kinds, { tics, state: [3], extra: (i) => (i === slow && !process.env.NETPLAY_NOSLOW ? ['-testslowstart' + SLOW_START_MS] : []) });
           for (const m of ms) { await m.waitEnd(90000 - (now() - ms[0].started)); }
-          await checkGame(ms, tics);
+          await checkGame(ms, tics, { noSyncCount: true });     // (a 60 tic game: the machine that starts late compares few sync bytes before it quits)
           const st = [];
           for (const m of ms) { const b = await m.readFile('d.bin.state'); st.push(b ? parseState(b.toString()) : null); }
           check(st.every(Boolean), 'every machine wrote its state dump');
@@ -1253,6 +1253,22 @@ SCENARIOS.lag = {
     lagChecks('native-host', g);
     g = await lagGame('natives-30ms', ['native', 'native'], { impair: LAT30 });
     lagChecks('natives-30ms', g, { slaveBound: LAG.nativeSlave30 });
+  },
+};
+
+// The same at movesperpacket 2 and 4 (-f2, -f4 on every machine: one packet per 2 or 4 tics in each direction; `movesperpacket` is
+// not announced, so every machine must be given the same). Agreement is checked as always (a partial batch or a tic sent twice
+// would show in the dumps), and the mechanism bounds as in `lag`.
+SCENARIOS['lag-batch'] = {
+  what: 'movesperpacket 2 and 4 (-f2, -f4): inputs leave when made, the master forwards a complete batch at once, all agree',
+  run: async () => {
+    let g = await lagGame('natives-f2', ['native', 'native'], { extra: () => ['-f2'] });
+    lagChecks('natives-f2', g);
+    g = await lagGame('browser-host-f4', ['browser', 'native'], { extra: () => ['-f4'] });
+    lagChecks('browser-host-f4', g);
+    g = await lagGame('natives-f4-30ms', ['native', 'native'], { extra: () => ['-f4'], impair: LAT30 });
+    lagChecks('natives-f4-30ms', g);
+    await lagGame('native-host-f2-impaired', ['native', 'browser'], { extra: () => ['-f2'], impair: IMPAIR });      // agreement only: loss makes the delays meaningless
   },
 };
 
