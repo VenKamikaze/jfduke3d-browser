@@ -26,7 +26,8 @@
 //        the game with -allowsharewarenet. Set it only for a deployment that is a LAN (a private network of
 //        people who each have the right to play the shareware version, say a party or a classroom), and
 //        never for a public site. It is taken only from this file, never from the page address: a link
-//        cannot switch it on. Network games themselves come with brief 04; the game data the player
+//        cannot switch it on. The browser plays network games since brief 04 (the tests start them with ?test=1&args=; the
+//        host and join pages come with brief 05); the game data the player
 //        picks with "Use your own copy" can be registered data, which always allows them (decision D14).
 //
 // relay: the vnet relay for network games (brief 05). Empty (the default). Not used yet: the page starts no network game.
