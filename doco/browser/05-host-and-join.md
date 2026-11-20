@@ -225,18 +225,24 @@ sed -i "s|relay: ''|relay: 'ws://127.0.0.1:7778/vnet'|; s|allowSharewareNetGames
 2. **`lag-highlat` did not discriminate; reshaped.** Measured on the current code (quiet machine, under `flock`): natives 500 ms with `-testsync` 2 of 5 complete, without `-testsync` 5 of 5; native + browser 400 ms 0 of 4 (316 to 344 of 350), at 300 ms 5 of 5. The host quits at `-testquit350` and leaves a lagging slave behind (D20's margin; `-testsync` makes packets bigger, a browser slave lags more). The scenario is now natives 500 ms and a browser slave at 300 ms, both without `-testsync` (`NETPLAY_HIGHLAT="nn:500:350:0,nb:300:350:0"` overrides the cases): **6 of 6 on the current code**; **with the nudge fix removed (`masterfwdsincetick` ignored) 3 of 3 fail**: the native slave ends at 293, 294 and 306 of 350 (285 to 307 in the earlier shapes), the browser case also failed in 2 of the 3. 04b's Outcome is corrected by a note there.
 3. **Nits.** Menu 1610: "that is not a room code" goes at the next edit (`joinerrlen`). `NetRelaunch()` strips a " (deleted)" suffix of `/proc/self/exe` with a message. The gresource rules depend on the glade file as well (the regenerated `startgtk_game_gresource.c` is byte-identical). Line references in `code-facts.md` re-checked (`NetGoneCheck()` `netlobby.c:540`, `NetRelaunch()` `:405`, `userack()` `game.c:10313`); `bugs.md` L18 cites §22.2.
 
-@@FIXREG@@
+**Regression after the fix round** (final code, one test at a time under `flock`)
+
+- `make test GAME_RUNS=1`: **exit 0, 27 PASS** (26 plus `test-relaunch-setup.sh`), no NOT RUN, 40 minutes.
+- `make test-web` as one command: `grptable` 12/0, `data` 193/0, `con` 17/0, `smoke` 36/0, `persist` 18/0, `focus` 24/0, `menu-keys` 23/0, then **`loops.js` 17 passed, 1 failed** (a responsiveness bound: "worst gap 715 ms" in the end sequence, software-rendered Chromium) and make stopped; `loops.js` alone passed 18/0 in 4 of 4 reruns (it had passed 18/0 in the earlier full run). A timing flake of this container, nothing in the brief touches those loops. So the rest was run by hand in the Makefile's order:
+- `netplay.js`, every scenario: **1,604 passed, 1 failed**; the failure is `hidden-host`'s "yields entered with data held back" (105 of 2,699, bound 1%). That check is noisy: five reruns of the 05 build gave 21/2,642 (pass), **55/2,707 (fail)**, 2, 2, 7; five runs of the 04b build (no 05 code) gave 4, 2, **53**, **46**, 2: it fails on both builds in about 1 run in 3 here (04b's Outcome measured 0 of 240 on a quieter machine). Not changed. **`lag-highlat` (reshaped) passed in the full run.**
+- `determinism.js` strict **22/0**; `frametime.js` 3 passed, 1 failed: the known 100 ms stall check.
+
+
 
 ## State
 
-**20 Nov 2026: finished, status review.** Everything in the Outcome is done and pushed (`browser/05-host-and-join`). Worktree `/home/user/wt-d05` (kept). Logs and scratch (not in git): `/home/user/d05-logs/`, `/home/user/d05-variants/` (mutated builds, `mutate.sh`, `runmut.sh`, `regress.sh`).
+**20 Nov 2026: fix round finished, status review.** The first review's findings are fixed (see "Fix round" above) and pushed (`browser/05-host-and-join`). Worktree `/home/user/wt-d05` (kept). Logs and scratch (not in git): `/home/user/d05-logs/`, `/home/user/d05-variants/` (mutated builds, `mutate.sh`, `runmut.sh`, `regress*.sh`, `measure*.sh`).
 
-- [x] 0 to 5. The brief, the page, the game, `NetGoneCheck()` and the hidden `userack()`, the native tests, the `netplay.js` scenarios.
-- [x] 5b. Mutations: all ten run and listed in the Outcome (the first run of the fork mutations was invalid and was redone, see there).
-- [x] 6. Regression: `make test GAME_RUNS=1` exit 0 (26 PASS); `make test-web` and `determinism.js` strict 22/0; `netplay.js` 1,602/5 (`lag-highlat`, equally failing on the 04b build); `frametime.js`'s known stall check.
-- [x] 7. Docs: Outcome, `code-facts.md` section 22, `building.md` section 9, `bugs.md` D21 to D23 (and L18, D8), the README row (review) and D14 text.
-- [x] 8. Report.
+- [x] Brief, page, game, tests, mutations, regression, docs (earlier sections).
+- [x] Fix round 1: `-nosetup` in the re-launch and `test-relaunch-setup.sh` (6 checks fail without it); menu 1610 message; `(deleted)`; gresource depends on the glade.
+- [x] Fix round 2: `lag-highlat` reshaped and measured (6 of 6; 3 of 3 failing without the nudge fix); 04b Outcome corrected; line references.
+- [x] Regression after the fix round: `make test` exit 0 (27 PASS); `netplay.js` 1,604/1 (`hidden-host`'s noisy held-back check, equally flaky on the 04b build); `determinism.js` 22/0; `frametime.js` known; `loops.js` flaked once in `make test-web` and passed 4 of 4 alone, so `make test-web` was not green as one command.
 
-**To do (the coordinator):** review; merge `--no-ff` into `claude` (no fork change); update `PROMPT.md` section 0.
+**To do (the coordinator):** merge `--no-ff` into `claude` (no fork change); update `PROMPT.md` section 0. Candidates for a later brief: `hidden-host`'s held-back-yields bound and `loops.js`'s 715 ms bound are flaky in this container.
 
-**Open problems:** none new. Known and reported: `frametime.js`'s 100 ms stall check; `lag-highlat` marginal at 400 to 500 ms (D20); D22 (a master left alone); D23 (the order screens).
+**Open problems:** none new. Known and reported: `frametime.js`'s 100 ms stall check; `lag-highlat` is only marginal at 400 to 500 ms with a browser slave or `-testsync` (D20; reshaped); `hidden-host` and `loops.js` have noisy timing bounds; D22; D23.
