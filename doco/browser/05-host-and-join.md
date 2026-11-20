@@ -114,20 +114,85 @@ A hidden tab (`NetHiddenTab()`, which is `jfbuild_browser_hidden_netgame()` in t
 
 ## Outcome
 
-(To be written when the work is done.)
+Status: **review** (branch `browser/05-host-and-join` in jfduke3d-browser, from `claude` `2eb459f`). **No fork change**: jfbuild stays at `5950d14` (it has the lobby, Start now, the session ids and `mmulti_vnet_silentms()`; the two mutation runs that change its `mmulti.c` were scratch builds, never committed), jfaudiolib, jfmact and vnet are untouched, so jfSW's `make test` was not affected and was not run. **No game-breaking bug of the original game was found**: no `fix/` branch; `bugs.md` D21 to D23 (lesser, none planned) and updates to L18 and D8. Nothing was merged, no pull request was opened, `claude` and `master` were not touched. `PROMPT.md` is not edited.
+
+**Commits** (in order): `ac09fb3` the brief; `c45af21` the page (A, B); `35f7cf8` the game (C, D, E, F: `netlobby.c`, the menus, the console, the startup window, `NetGoneCheck()`, `userack()`); `a3d174e` the native tests and the `netplay.js` scenarios, with the hash and hidden-tab changes they found; `9d995ba` more tests and the first docs; `6c5545c` the re-launch without a `chdir`; then the documentation and Outcome commits.
+
+**What landed, per requirement** (jfSW's 05 point by point; what differs for Duke is in bold)
+
+- *A. `?host=N` and `?join=CODE`* (`web/jfduke3d.js`): on any page, relay from `config.js` only, bad values, no relay, both parameters and **the shareware gate (D14) closed** said on the page before a game starts; N 2 to 8, **4 on shareware data** (`res.game === 'DUKESW'`); `-allowsharewarenet` goes before `-net`. `lobby-errors`: 12 page cases, each with its message, a button back to the start page, no page error.
+- *B. The lobby overlay*: jfSW's HTML and CSS unchanged in substance; the game pushes its state (`Module.jfswLobby`), the page returns Start now and Cancel; keyboard only works (`lobby`: Tab to Start now, Enter, Cancel by Enter), 360 px wide window fits, the invite link keeps `?data=`.
+- *C. Start now*: the fork's protocol through `NetLobbyWait()`; **it needed nothing else in Duke** (`numplayers` is first read after the wait). 2 of 3 (two browsers), 2 of 4 (native host by `start` on its input, browser guest; browser host, native guest), a Cancel renumbering (`compaction`: B moves down to player 2, C is player 3): every `-testdump` equal. A refused early `start` is not remembered. Late joiners (browser and native) are told "the game has already started" in 0.5 to 1.1 s.
+- *D. Host and join from inside the game*: console `host [players]`, `join <code>`, `relay [HOST:PORT]`; **HOST ONLINE (G) and JOIN ONLINE (J) in the title menu only** (the in-game menu 50 would have nine items; menus 1600 and 1610, the room code typed with `strget()`); **the re-launch leaves through `gameexit("")` and `NetRelaunch()` at its end** (jfSW returns through `Control()`); the entries are hidden and the commands refuse under the shareware gate; the GTK startup window has an "Online, through the relay" box (`test-startwin.sh`, xvfb); `[Comm Setup] Relay` in `duke3d.cfg`.
+- *E. Error states and L18 (the rest)*: `NetGoneCheck()` from `getpackets()`: a host or guest silent for 15 s ends the others' game with a message (15.2 s after the process died in `test-gone.sh`; 15.3 s for a browser host, 17.2 s for a guest told by the host in `lobby-errors`). **A proper quit is not a vanish in Duke**: the guest is taken out ("X is history!") and the others play on (`guest-quit`, `rejoin-quit`: equal dumps to tic 1200); only the master's quit ends the game, and **relay games now say "The host ended the game"** (D21). The relay-lost, unreachable, unknown room, full room, started, host-left-the-room cases are the fork's messages, each reached by `lobby-errors` or `errors`.
+- *F. The hidden guest at a level end*: **co-op has nothing to wait at in Duke; the deathmatch totals table (`userack()`) is it.** `userack()` returns at once for a hidden tab in a network game (`NetHiddenTab()`); visible players wait for their key as in the original. `test-hidden-bonus.sh` (two hidden natives, relay and UDP) and `level-end` (a hidden browser guest, then a hidden host, the visible one pressing Space): the next level's dump and state agree.
+
+**Decisions** (the conservative option, closest to jfSW)
+
+1. **No fork change; no `QuitFlag`.** Duke's loop is inline and everything ends in `gameexit()`, so the re-launch is called at the end of it.
+2. **Menu entries after QUIT in the title menu only** (jfSW's layout; menu 50 has no room). Hot keys G and J.
+3. **Console commands are not hidden under D14** (they refuse with the gate's wording); the menu entries are (the README said "hiding the menu and console entries").
+4. **`-testnodraw` stays hidden after the others have left** (`playerswhenstarted > 1`), and the tests' quitters run it: a game that ends on shareware data shows two order screens that wait for a key (D23).
+5. **The owner of a player's gibs is out of the state hash** (`IsLocalGib()`), as a monitor's owner is (D18): a guest's proper quit gibs its player with `myconnectindex` as owner (D8), which made every sprite of the gibs differ between machines and `-testsync` report 96 mismatches with nothing wrong in the game. Reverting it fails `test-rejoin.sh` and `test-gone.sh guest-quit`.
+6. **No `chdir` back before the re-launch** (my first version restored the starting directory; the test for it showed the original game cannot use a relative `-j` path after its own `chdir` in the first process either, so it changes nothing).
+7. `NetOnlineAvailable()` caches the gate (the menu asks it every frame, and for registered data it is a file lookup).
+8. The relay's `?relay=` knob stays gone and test mode needs both `?test=1` and `testMode: true` (already so from 03/04; `lobby-errors` checks it).
+
+@@RESULTS@@
+
+**Not done, or only partly**
+
+- Windows: the re-launch's `_execv` quoting is written (with the bound fixed that jfSW's review noted) but not built or run; the Windows and macOS startup windows have no online choice; the Xcode project does not list `netgame.c` or `netlobby.c` (it did not list `netgame.c` before). `start` on the standard input is the native Start now there.
+- Firefox, Safari, a real GPU, a real network, a registered GRP, a person playing; a tab that is really hidden at the totals table (Playwright cannot hide one: the imitation is as in 04).
+- Plain UDP has no silence clock: `NetGoneCheck()` is relay-only (the L18 row says so).
+- A deathmatch totals table is tested only through `-testexit`; the same table in `gameexit()`'s and `newgame()`'s `dobonus(1)` is the same `userack()`.
+- The shareware order screens (D23) still wait for a key for a visible player at the end of a game.
+
+**Follow-ups** (none needed for this brief)
+
+- jfSW's 02c page-error fixes and 06b's WebTransport rejection rule were prerequisites of its 05 page code; Duke's page had both from 02 and 04: nothing to port. jfSW's 05b notice (`#notice`, `jfswNotice`) and 06 (deployment, `deploy.md`, `check-deploy.sh`) are the next two Duke briefs.
+- `config.js`'s `relay` must be set for the page's host/join (brief 06's deployment guide), and the relay's `-origins` must name the page's origin.
+- D22 (a master left alone answers nobody and loses its relay session) would be a fork change (shared with jfSW); D20 (the 256 byte datagram) is still open.
+
+**Play-test steps (Arch Linux)**
+
+```
+sudo pacman -S --needed base-devel git unzip python nodejs npm go sdl2 libvorbis libogg mesa glu alsa-lib gtk3
+git clone --recurse-submodules -b browser/05-host-and-join https://github.com/VenKamikaze/jfduke3d-browser
+cd jfduke3d-browser
+scripts/setup-emsdk.sh && scripts/build-wasm.sh && scripts/fetch-test-data.sh && make -j4
+cp testdata/duke3dshare.grp build-wasm/
+(cd ext/vnet/relay && go build -o /tmp/vnet-relay ./cmd/vnet-relay)
+/tmp/vnet-relay -udp 127.0.0.1:7777 -http 127.0.0.1:7778 -origins 127.0.0.1:8000 -v                                   # terminal 1
+sed -i "s|relay: ''|relay: 'ws://127.0.0.1:7778/vnet'|; s|allowSharewareNetGames: false|allowSharewareNetGames: true|" build-wasm/config.js   # a LAN: gate open
+(cd build-wasm && python3 -m http.server 8000 --bind 127.0.0.1)                                                       # terminal 2
+```
+
+(For another machine on the LAN use this machine's LAN address instead of 127.0.0.1 in all four places and open the page by it.)
+
+1. **Host in one browser, join from the link in another.** Open `http://127.0.0.1:8000/?host=3`, click "Click to host a game of 3". The lobby shows a room code, an invite link (Copy) and "1 of 3 players are in". Paste the link into a second window: both say "2 of 3". Tab moves through Copy, Start now and Cancel; narrow the window to phone width and nothing is cut off. Press **Start now**: both lobbies go and the game starts in the title screens; skip the logo with a key. **On the host: NEW GAME, set the game type to co-op, START GAME**, and play a minute. Open the link in a third window: "the game has already started".
+2. **Cancel.** `?host=2`, join from the link, Cancel on the guest (the host's count drops at once), join again, Cancel on the host (the guest is told at once).
+3. **From the title menu and the console.** On `http://127.0.0.1:8000/` skip the logo: the menu has **HOST ONLINE** and **JOIN ONLINE** after QUIT (keys G and J). Host with "2 PLAYERS"; in another window JOIN ONLINE, type the code, Enter (a wrong code says so and stays). Also the console (Num Lock): `host 2`, `join CODE`.
+4. **Natively.** `./duke3d -setup` ("Online, through the relay", relay `127.0.0.1:7777`, host 3, Start) or, in a game, the console: `relay 127.0.0.1:7777`, then `host 3`: the game closes and starts again into the lobby; type `start` and Enter in its terminal with 2 in. Join from a browser with `?join=CODE`.
+5. **A machine that vanishes.** In a game of 2 close the guest's tab (or `kill -9` the native game): the host's game ends about 15 seconds later with "player 2 (...) left the game". Close the host's tab: the guest ends with "the host left the game". A guest that quits properly (menu, Quit) is taken out and the others play on.
+6. **A hidden guest at a level end.** Host and join (`?host=2`), start a **deathmatch** (game type "dukematch (spawn)"), play to the exit switch of E1L1, switch the guest's browser to another tab or minimise it before that. On the host press a key at the totals table: the next level must start within a few seconds (it used to wait for the hidden guest's key). Show the guest's tab: it is in E1L2.
+7. **The tests on your machine**, one at a time: `node tests/web/netplay.js lobby start-now host-join lobby-errors level-end rejoin-vanish rejoin-quit compaction`, `tests/net/test-startwin.sh` (needs `xorg-server-xvfb`), `tests/net/test-rejoin.sh`, `tests/net/test-gone.sh`, `tests/net/test-hidden-bonus.sh`.
 
 ## State
 
-**Written 20 Nov 2026; nothing implemented yet.** Worktree `/home/user/wt-d05` (branch `browser/05-host-and-join`, from `origin/claude` `2eb459f`; kept). Logs and scratch: `/home/user/d05-logs/`, `/home/user/d05-variants/` (not in git). Build: native `make -j4` (done once), wasm `EMSDK_DIR=~/.cache/jfsw-browser/emsdk scripts/build-wasm.sh`; the test GRP is copied from `/home/user/wt-d04b/testdata/`.
+**20 Nov 2026: implemented and tested; the mutation runs and the full regression are being run (see the checklist).** Worktree `/home/user/wt-d05` (branch `browser/05-host-and-join`, from `origin/claude` `2eb459f`; kept). Logs and scratch (not in git): `/home/user/d05-logs/` (test logs, `mut-*.log` the mutation runs), `/home/user/d05-variants/` (mutated builds, `mutate.sh`, `runmut.sh`). Build: native `make -j4`, wasm `EMSDK_DIR=~/.cache/jfsw-browser/emsdk scripts/build-wasm.sh` (rebuild both after any change; the mutation script rebuilds both at its end); the test GRP is copied from `/home/user/wt-d04b/testdata/`.
 
 Remaining work, in order (tick as done):
 
-- [ ] 0. This brief, committed and pushed.
-- [ ] 1. Page (A, B): `web/jfduke3d.js` (`?host=`, `?join=`, lobby, `Module.jfswLobby`, `Module.jfswNetGame`, the end overlay's button), `web/index.html`, `web/jfduke3d.css`, `web/config.js` comments.
-- [ ] 2. Game (C, D): `src/netlobby.c`/`.h` (`NetLobbyWait`, `NetRestart`, `NetRelaunch`, `NetStartwinArgs`, `NetIsRoomCode`), `Startup()`, `app_main`, `gameexit()`, `config.c` (`Relay`), Makefiles, `osdcmds.c` (CRLF), `menues.c` (CRLF), startup window, `run-headless.sh` stdin, `-testosd`.
-- [ ] 3. E and F: `NetGoneCheck()`, the host's quit message, `userack()`.
-- [ ] 4. Native tests: `test-startwin.sh`, `test-rejoin.sh`, `test-gone.sh`, `test-hidden-bonus.sh`, `test-errors.sh`; mutations.
-- [ ] 5. Browser tests: `netplay.js` scenarios; mutations.
-- [ ] 6. Regression: `make test GAME_RUNS=1`, `netplay.js` (all), `make test-web`.
-- [ ] 7. Docs: Outcome, `code-facts.md` §22, `building.md`, `bugs.md` D21+, README row to "review".
+- [x] 0. This brief, committed and pushed.
+- [x] 1. Page (A, B): `web/jfduke3d.js`, `index.html`, `jfduke3d.css`, `config.js`.
+- [x] 2. Game (C, D): `src/netlobby.c`/`.h`, `Startup()`, `app_main`, `gameexit()`, `config.c`, Makefiles, `osdcmds.c` (CRLF), `menues.c` (CRLF), the startup window, `run-headless.sh`, `-testosd`.
+- [x] 3. E and F: `NetGoneCheck()`, the host's quit message, `userack()`.
+- [x] 4. Native tests: `test-startwin.sh`, `test-rejoin.sh`, `test-gone.sh`, `test-hidden-bonus.sh`, the gate cases of `test-shareware-gate.sh`.
+- [x] 5. Browser tests: `netplay.js` `lobby`, `start-now`, `host-join`, `lobby-errors`, `level-end`, `rejoin-vanish`, `rejoin-quit`, `compaction`: all pass.
+- [ ] 5b. Mutations (`/home/user/d05-variants/runmut.sh`, logs `mut-*.log`): hidden-bonus without the `userack()` change, gone without `NetGoneCheck()`, the gate not asked, rejoin without session ids, rejoin with the gib owner hashed, the overlay count, Start now without the count, level-end without the `userack()` change, lobby-errors with `NetGoneCheck()` and the gate off.
+- [ ] 6. Regression: `make test GAME_RUNS=1`, `netplay.js` (all), `make test-web` (with strict `determinism.js`).
+- [ ] 7. Docs: the results in the Outcome, the README row ("review": done).
 - [ ] 8. Report.
+
+**Open problems:** none new. Known and reported: `frametime.js`'s 100 ms stall check; bugs.md D20, D22, D23.
