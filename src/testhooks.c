@@ -4,6 +4,7 @@
 #include "duke3d.h"
 #include "testhooks.h"
 #include "netgame.h"
+#include "osd.h"
 #include "mmulti_vnet.h"
 #ifndef _WIN32
 #include <time.h>
@@ -115,6 +116,20 @@ static int PtrOffset(const int *p)
 // and a player's yoffset
 #define IsMonitor(s) ((s)->statnum == 6 && ((s)->picnum == VIEWSCREEN || (s)->picnum == VIEWSCREEN2 || (s)->picnum == VIEWSCREENBROKE))
 
+// A player's gibs (guts() in actors.c, which quickkill() in player.c and sector.c call with myconnectindex: bugs.md D8)
+// get the sprite of THIS machine's player as their owner, so on another machine the owner is another player's sprite. Nothing
+// reads the owner of a gib (their movement code never touches it, they take no hits), but the hash showed it: the first
+// time a player was gibbed in a game of 3 or more (a guest that quits properly is, brief 05: "X is history!"), every sprite of
+// the gibs differed between the machines from then on. It is not compared when it is a player's sprite and the picture is one of
+// the JIBS (statnum 5); any other owner of any other sprite still is.
+static int IsPlayerSprite(int i)
+{
+    int k;
+    for (k = 0; k < MAXPLAYERS; k++) if (ps[k].i == i) return 1;
+    return 0;
+}
+#define IsLocalGib(i) (sprite[i].statnum == 5 && sprite[i].picnum >= JIBS1 && sprite[i].picnum <= JIBS6 && IsPlayerSprite(sprite[i].owner))
+
 static void WalkState(emit_fn e)
 {
     int i, j, k;
@@ -188,7 +203,7 @@ static void WalkState(emit_fn e)
         // a security monitor's owner is the camera it shows: the use key sets it (sector.c), and animatecamsprite()
         // (drawing) overwrites it with the player's newowner on a machine that draws: nothing in the simulation reads
         // it (code-facts.md section 20), so it is not compared
-        if (!IsMonitor(s)) S(owner);
+        if (!IsMonitor(s) && !IsLocalGib(i)) S(owner);
         S(xvel); S(yvel); S(zvel);
         S(lotag); S(hitag); S(extra);
     }
@@ -209,7 +224,7 @@ static void WalkState(emit_fn e)
     for (i = 0; i < MAXSPRITES; i++) {
         if (sprite[i].statnum >= MAXSTATUS) continue;
         t = &hittype[i];
-        T(cgg); T(picnum); T(ang); T(extra); T(owner); T(movflag); T(tempang);
+        T(cgg); T(picnum); T(ang); T(extra); if (!IsLocalGib(i)) T(owner); T(movflag); T(tempang);
         T(actorstayput); T(timetosleep); T(floorz); T(ceilingz); T(lastvx); T(lastvy);
         T(bposx); T(bposy); T(bposz);
         // not temp_data of the ambient sound sprites (statnum 11, MUSICANDSFX): movefx() keeps T1, T2
@@ -468,6 +483,8 @@ static void TestDumpTic(int tic)
 static int TestExitDone;
 static int TestStallTic, TestStallMs, TestStallDone;
 static int TestLateTic, TestLateMs, TestLateDone;      // -testlate<T>,<ms> (brief 04)
+static int TestOsdTic, TestOsdDone;                    // -testosd<T>,<command> (brief 05)
+static char TestOsdCmd[128];
 static int TestSaveTic, TestSaveDone;                  // -testsave<T> (brief 04 fix round)
 
 void TestExitArg(int tic)  { TestExitTic = tic; }
@@ -524,6 +541,16 @@ void TestLateArg(const char *arg)
 
     TestLateTic = atoi(arg);
     TestLateMs = c ? atoi(c + 1) : 1000;
+}
+
+// -testosd<T>,<command>: at game tic T of the first level this machine runs the console command (for
+// example "host 2" or "quit"), as if typed into the console. Per machine, nothing on the wire.
+void TestOsdArg(const char *arg)
+{
+    const char *c = strchr(arg, ',');
+
+    TestOsdTic = atoi(arg);
+    Bsnprintf(TestOsdCmd, sizeof(TestOsdCmd), "%s", c ? c + 1 : "");
 }
 
 void TestInputHook(void)
@@ -1307,6 +1334,11 @@ void TestTicHook(void)
     if (TestStallTic > 0 && !TestStallDone && TestLevelNo <= 1 && tic == TestStallTic) {
         TestStallDone = 1;
         TestStall();
+    }
+    if (TestOsdTic > 0 && !TestOsdDone && TestLevelNo <= 1 && tic == TestOsdTic) {
+        TestOsdDone = 1;
+        buildprintf("TEST: console command at tic %d: %s\n", tic, TestOsdCmd);
+        OSD_Dispatch(TestOsdCmd);
     }
 
     if (TestNudgeTic >= 0 && tic == TestNudgeTic) {

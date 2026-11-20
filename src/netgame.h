@@ -41,6 +41,9 @@ int NetGameAllowed(void);
 // 1 when a network game may be started with a main GRP of this kind (GAMEGRP_GAME_*): the early
 // check, before the data is mounted. It may only refuse what NetGameAllowed() would refuse too.
 int NetGameAllowedFor(int game);
+// The gate's explanation (several lines), for the entry points that refuse without exiting (the console's host
+// and join, brief 05).
+const char *NetSharewareGateText(void);
 // Say why not (stdout, the log and a message box) and exit with status 1. Closes the network
 // first (uninitmultiplayers), so a relay room that was just made is left again.
 void NetRefuseShareware(void);

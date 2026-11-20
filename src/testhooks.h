@@ -44,6 +44,8 @@
 //                      start for the tic 1 check. Per machine; changes nothing but when this machine starts.
 //   -testnewgame<T>    (04b fix round) this machine starts a new game (packet 5, as the menu does) when it has played T tics
 //                      of the first level; the others follow when the packet reaches them. Per machine.
+//   -testosd<T>,<cmd>  (05) at game tic T of the first level this machine runs the console command <cmd> ("host 2",
+//                      "join CODE", "quit"), as if typed into the console. Per machine; nothing on the wire.
 //   -testmenu          (D3) "TEST: menu N" is printed whenever the menu of a game opens, changes or closes.
 //   -testpredict       (A1) every call of fakedomovethings() (the prediction of the local player's moves) is
 //                      checked: the raw bytes of every table of the simulation are hashed before and after
@@ -83,6 +85,7 @@ void TestArmArg(void);          // -testarm: every weapon with full ammo, and fu
 void TestPredictArg(void);
 void TestMenuArg(void);
 void TestSaveArg(int tic);
+void TestOsdArg(const char *arg);       // "<T>,<command>"
 void TestLateArg(const char *arg);      // "<T>,<ms>"
 void TestLagArg(const char *name);
 void TestSlowStartArg(int ms);

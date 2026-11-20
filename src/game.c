@@ -37,6 +37,7 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 #include "grpscan.h"
 #include "mmulti_vnet.h"
 #include "netgame.h"
+#include "netlobby.h"
 #include "testhooks.h"
 
 #include "util_lib.h"
@@ -831,6 +832,9 @@ void getpackets(void)
     // master's included, and a batch of movesperpacket tics always goes whole.
     if (networkmode == 0 && myconnectindex == connecthead && ready2send && !inbarrier)
         sendmasterpackets(0x7fffffff);
+
+    // Brief 05: a relay game whose host or guest has vanished ends with a message (netlobby.c).
+    NetGoneCheck();
 }
 
 extern void computergetinput(int snum, input *syn);
@@ -2209,6 +2213,8 @@ void gameexit(const char *t)
     }
 
     uninitgroupfile();
+
+    NetRelaunch();      // host or join asked for a re-launch into a network game (netlobby.c): does not return then
 
     exit(0);
 }
@@ -7148,6 +7154,9 @@ void checkcommandline(int argc, char const * const *argv)
                 else if (!Bstrncasecmp(c,"testsave",8)) {
                     TestSaveArg(atoi(c+8));     // test-only: this machine asks for a multiplayer save game at tic T
                 }
+                else if (!Bstrncasecmp(c,"testosd",7)) {
+                    TestOsdArg(c+7);            // test-only: this machine runs a console command at tic T (brief 05)
+                }
                 else if (!Bstrncasecmp(c,"testlate",8)) {
                     TestLateArg(c+8);           // test-only: this machine holds back its input of tic T for a while before it sends it
                 }
@@ -7756,12 +7765,10 @@ void Startup(void)
     if (netsuccess) {
         buildprintf("Waiting for players...\n");
         mmulti_vnet_setplayercap(VOLUMEONE ? 4 : MAXPLAYERS);   // for -net -relay ... -host-room N
-        while (initmultiplayerscycle()) {
-            handleevents();
-            if (quitevent) {
-                Shutdown();
-                return;
-            }
+        // the wait for the players (and, in a relay game, the lobby: netlobby.c)
+        if (!NetLobbyWait()) {
+            Shutdown();
+            return;
         }
         // The relay refused us, could not be reached, or the host is gone.
         NetFailIfRelayFailed();
@@ -7875,6 +7882,8 @@ int app_main(int argc, char const * const argv[])
     (void)configloaded;
 #endif
 
+    NetSetArgs(argc, argv);     // for host and join (netlobby.c), before any change of directory
+
 #if defined(DATADIR)
     {
         const char *datadir = DATADIR;
@@ -7954,6 +7963,7 @@ int app_main(int argc, char const * const argv[])
     }
 
     buildsetlogfile("duke3d.log");
+    NetLogRelaunch();           // netlobby.c
 
     wm_setapptitle("JFDuke3D");
     buildprintf("\nJFDuke3D\n"
@@ -7989,6 +7999,7 @@ int app_main(int argc, char const * const argv[])
         // one. The authoritative check is below, once every group file is mounted.
         if (gamegrp && !startwinwillrun && !NetGameAllowedFor(gamegrp->game)) NetRefuseShareware();
         netsuccess = initmultiplayersparms(endnetparam - netparam, &argv[netparam]);
+        if (netsuccess) NetNoteRelayArg(endnetparam - netparam, &argv[netparam]);
         // A bad -relay, -host-room or -room (mmulti has said what): do not fall back to a
         // single player game the way a plain -net failure does.
         if (!netsuccess) NetFailIfRelayFailed();
@@ -8038,7 +8049,19 @@ int app_main(int argc, char const * const argv[])
             const char *parmarr[3] = { modeparm, NULL, NULL };
             int parmc = 0;
 
-            if (settings.joinhost) {
+            if (settings.hostroom > 1 || settings.joinroom) {
+                // brief 05: online, through the relay (netlobby.c)
+                const char *onlinearr[8];
+                int onlinec = NetStartwinArgs(onlinearr, settings.hostroom, settings.joinroom);
+                if (settings.joinroom) {
+                    free(settings.joinroom);
+                }
+                if (onlinec < 0) {
+                    exit(1);
+                }
+                netsuccess = initmultiplayersparms(onlinec, onlinearr);
+                if (!netsuccess) NetFailIfRelayFailed();
+            } else if (settings.joinhost) {
                 strcpy(modeparm, "-nm");
                 parmarr[1] = settings.joinhost;
                 parmc = 2;
@@ -8566,6 +8589,7 @@ int playback(void)
         setgamepalette(&ps[myconnectindex], palette, 1);    // JBF 20040308
         drawbackground();
         menus();
+        TestMenuPoll();         // test-only: -testmenu (the title menu is not drawn by displayrest())
         //ps[myconnectindex].palette = palette;
         nextpage();
         fadepal(0,0,0, 63,0,-7);
@@ -8659,6 +8683,7 @@ int playback(void)
         else
         {
             menus();
+            TestMenuPoll();     // test-only: -testmenu
             if( ud.multimode > 1 )
             {
                 ControlInfo noshareinfo;
@@ -9332,7 +9357,7 @@ char domovethings(void)
           adduserquote(buf);
 
           if(j < 0 && networkmode == 0 )
-              gameexit( " \nThe 'MASTER/First player' just quit the game.  All\nplayers are returned from the game. This only happens in 5-8\nplayer mode as a different network scheme is used.");
+              gameexit( NetMasterQuitText() );       // (the original's text for plain UDP; a relay game says what happened)
       }
 
       if ((numplayers >= 2) && (TestSyncOn || (movefifoplc&7) == 7))
@@ -10293,6 +10318,14 @@ void userack(void)
     do {
         handleevents();
         getpackets();
+        // Brief 05: a hidden browser tab in a network game cannot be given a key (nobody sees it), and the other
+        // machines wait for it at the start of the next level: the deathmatch totals table (dobonus) would hold
+        // the room up at every level end. It leaves at once. Nothing here is simulation (code-facts.md 22).
+        if (NetHiddenTab())
+        {
+            buildputs("Network game: this tab is hidden, so it leaves the screen by itself.\n");
+            break;
+        }
         CONTROL_GetUserInput(&uinfo);
     } while ( !KB_KeyWaiting() && !uinfo.button0 && !uinfo.button1 );
     CONTROL_ClearUserInput(&uinfo);

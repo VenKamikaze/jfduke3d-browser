@@ -28,6 +28,7 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 #include "duke3d.h"
 #include "scriplib.h"
 #include "osd.h"
+#include "netlobby.h"
 
 // we load this in to get default button and key assignments
 // as well as setting up function mappings
@@ -597,6 +598,7 @@ int32 CONFIG_ReadSetup( void )
     SCRIPT_GetString( scripthandle, "Comm Setup","PlayerName",myname, sizeof(myname));
     SCRIPT_GetString( scripthandle, "Comm Setup","RTSName",ud.rtsname, sizeof(ud.rtsname));
     SCRIPT_GetNumber( scripthandle, "Comm Setup","AllowSharewareNetGames",&AllowSharewareNet);
+    SCRIPT_GetString( scripthandle, "Comm Setup","Relay",NetRelay, sizeof(NetRelay));     // brief 05 (netlobby.h)
 
     SCRIPT_GetNumber( scripthandle, "Screen Setup", "Shadows",&ud.shadows);
     SCRIPT_GetString( scripthandle, "Screen Setup", "Password",ud.pwlockout, sizeof(ud.pwlockout));
@@ -828,6 +830,7 @@ void CONFIG_WriteSetup( void )
     }
 
     SCRIPT_PutString( scripthandle, "Comm Setup","PlayerName",&myname[0]);
+    SCRIPT_PutString( scripthandle, "Comm Setup","Relay",NetRelay);
 
     SCRIPT_Save (scripthandle, setupfilename);
     SCRIPT_Free (scripthandle);

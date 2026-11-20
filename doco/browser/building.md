@@ -276,3 +276,48 @@ tests/net/test-shareware-gate.sh [--game FILE]                # D14: refused by 
 `tests/net/build-baseline.sh` builds the game as it was before brief 01 (`7e0cd72`). **`make test` therefore runs `git worktree add` on your repository** (a detached worktree in `~/.cache/jfduke3d-browser/baseline-<commit>`; `git worktree list` shows it, `git worktree remove --force` deletes it: the submodules need `--force`) and needs network access to the submodule forks the first time (it checks out jfbuild, jfaudiolib, jfmact and vnet there and builds them). After editing anything in `jfbuild/`, run `make test` or `make -C jfbuild USE_POLYMOST=1 USE_OPENGL=1 USE_ASM=0 libengine.a`: the top-level `make` does not rebuild an existing `jfbuild/libengine.a`. (The `make test` targets do it: `engine-current`.)
 
 Running the suites of both games on one machine: one at a time (`flock /tmp/jfd-heavy-tests.lock make test-net`), they are timing sensitive.
+
+## 9. Host and join from the game (brief 05)
+
+### 9.1 In the browser
+
+`config.js`'s `relay` is the relay's WebSocket URL (`'wss://relay.example.org/vnet'`, or `'ws://127.0.0.1:7778/vnet'` for a local one; empty by default: the page then says it cannot host or join). It is the only place the page takes a relay from: never the address. The relay's `-origins` must name the page's host and port exactly (`vnet`'s `relay-protocol.md`). With the shareware data and `allowSharewareNetGames: false` (the default, D14) the page refuses `?host=` and `?join=` and says why.
+
+| Address | What happens |
+|---|---|
+| `?host=N` | hosts a game of N players (2 to 8; 4 with the shareware data): the game starts with `-net -relay URL -host-room N`, the lobby overlay shows the room code, a copyable invite link (`?join=CODE` on this page, `?data=` kept), "N of M players are in", **Start now** once 2 are in, and Cancel |
+| `?join=CODE` | joins that room (six letters and digits, no 0, 1, I or O; any case); the invite link is this |
+| neither | the normal page. In the game: the title menu has **HOST ONLINE** (hot key G; 2 to 4 or 8 players) and **JOIN ONLINE** (J; type the code, Enter) after QUIT, and the console (Num Lock) has `host [players]` and `join <code>`. All of them reload the page with `?host=N` / `?join=CODE` |
+
+A bad value, no relay, both parameters at once, or a closed shareware gate show a message and a button to the start page and start no game. A failure after the start (relay unreachable, no such room, room full, the game has already started, the host left the room, the host or a player left the game, the relay session lost) ends on the same overlay with the game's own sentence and "Back to the start page". The in-game menu (Escape in a game) has no online entries: use the console, or "QUIT TO TITLE" first.
+
+Try it locally, with the shareware data and the gate open for your LAN (`allowSharewareNetGames`):
+
+```sh
+scripts/build-wasm.sh && scripts/fetch-test-data.sh && cp testdata/duke3dshare.grp build-wasm/
+(cd ext/vnet/relay && go build -o /tmp/vnet-relay ./cmd/vnet-relay)
+/tmp/vnet-relay -udp 127.0.0.1:7777 -http 127.0.0.1:7778 -origins 127.0.0.1:8000 -v           # terminal 1
+sed -i "s|relay: ''|relay: 'ws://127.0.0.1:7778/vnet'|; s|allowSharewareNetGames: false|allowSharewareNetGames: true|" build-wasm/config.js   # (build-wasm/ only; web/config.js stays as it is)
+(cd build-wasm && python3 -m http.server 8000 --bind 127.0.0.1)                              # terminal 2
+# open http://127.0.0.1:8000/?host=3 , copy the invite link into a second window, press Start now, play
+```
+
+### 9.2 Natively
+
+`./duke3d -net -relay relay.example.org:7777 -host-room 3 -- ...` and `-room CODE` as before (§8). New: **the lobby** and **the relay setting**.
+
+- While a relay game waits for its players the host's terminal says `Lobby: N of M players are in room CODE.` The host starts early with a line **`start`** on its standard input (`cancel` leaves the room), or with the **Start now** button of the GTK startup window (`./duke3d -setup`); the video mode is not set during the wait, so the console and the game window cannot be used for it. `run-headless.sh` passes its standard input on, so a test can type `start`.
+- **`relay HOST:PORT`** in the console sets the relay that `host` and `join` use; it is kept in `duke3d.cfg` (`[Comm Setup]`, `Relay = "relay.example.org:7777"`), as is the relay of a successful `-net -relay HOST:PORT` start and the one typed into the startup window. `host [players]` (default: the most the data allows) and `join <code>` leave the game and **re-launch it** with `-net -relay <setting> -host-room N | -room CODE --` and the rest of its own arguments (`-allowsharewarenet` carried over, `-nosetup` added so that the startup window does not come back; `execv` of `/proc/self/exe` on Linux, `argv[0]` elsewhere, `_execv` on Windows: written, not built or run here). Without a relay setting they say how to set one. With the shareware data and the gate closed they print the gate's wording and do nothing (the menu entries are hidden then). The new process starts its log with "Re-launched by host/join from a running game: ...".
+- **The GTK startup window** has a check box "Online, through the relay:" and a relay field: "Join multi-player game" then takes a room code (not a host address) and "Host multi-player game" a player count (the engine's room limit, 8, and 4 on shareware, clamp it with a message). Windows and macOS windows are unchanged.
+
+### 9.3 The tests of brief 05
+
+```sh
+node tests/web/netplay.js lobby start-now host-join lobby-errors level-end rejoin-vanish rejoin-quit compaction   # about 25 minutes, one at a time under flock
+tests/net/test-startwin.sh      # the GTK window hosts and joins by code under xvfb-run (about 40 s; NOT RUN, exit 3, without xvfb-run or a GTK build)
+tests/net/test-rejoin.sh        # a newcomer at a departed player's relay address is refused (vanish, quit in a game of 3, quit alone: bugs.md D22)
+tests/net/test-gone.sh          # a host or guest that vanishes ends the others' game with a message; proper quits
+tests/net/test-hidden-bonus.sh  # two hidden players through a deathmatch level end, relay and UDP
+```
+
+All four are in `make test-net`. `-testosd<T>,<command>` (testhooks.h) types a console command into a native game at tic T. The page's menus are reached by `netplay.js host-join` through `-testmenu` ("TEST: menu N", also in the title menu). `JFDUKE3D_TEST_STARTWIN="host=N relay=ADDR [startnow=K]"` or `"room=CODE relay=ADDR"` fills the startup window in as a person would (test only). **Play-test steps for a person** are in the brief's Outcome.

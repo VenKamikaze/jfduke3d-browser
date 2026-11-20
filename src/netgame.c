@@ -32,14 +32,19 @@ int NetGameAllowed(void)
     return !NetDataIsShareware() || AllowSharewareNet || AllowSharewareNetCmd;
 }
 
-void NetRefuseShareware(void)
+const char *NetSharewareGateText(void)
 {
-    static const char *why =
+    return
         "Network games are switched off for the shareware version of Duke Nukem 3D.\n"
         "Its licence does not allow online multiplayer services, so shareware network games\n"
         "are meant for a local network only. If you are on one, allow them with\n"
         "AllowSharewareNetGames = 1 under [Comm Setup] in duke3d.cfg, or start the game with\n"
         "-allowsharewarenet. The registered version has no such limit.";
+}
+
+void NetRefuseShareware(void)
+{
+    const char *why = NetSharewareGateText();
 
     buildprintf("Network game refused: %s\n", why);
     uninitmultiplayers();
@@ -112,7 +117,10 @@ int NetHiddenTab(void)
 #ifdef __EMSCRIPTEN__
     if (jfbuild_browser_hidden_netgame()) return 1;
 #endif
-    return TestNoDrawOn && numplayers > 1;
+    // (playerswhenstarted: a game that began as a network game and has lost the others since still draws nothing, as the
+    // browser's hidden tab does while its relay session lasts; brief 05: the quit message of a master that left shows
+    // order screens on shareware data, which a hidden tab skips)
+    return TestNoDrawOn && (numplayers > 1 || playerswhenstarted > 1);
 }
 
 // One pass of the game loop of a hidden browser tab in a network game, called by app_main's loop
