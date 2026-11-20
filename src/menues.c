@@ -29,6 +29,8 @@ Modifications for JonoF's port by Jonathon Fowler (jf@jonof.id.au)
 #include "mouse.h"
 #include "animlib.h"
 #include "osd.h"
+#include "netlobby.h"
+#include "netgame.h"
 #include <sys/stat.h>
 #include <assert.h>
 
@@ -1108,6 +1110,12 @@ int quittimer = 0;
 static int menuwasopen = 0;
 #endif
 
+// Brief 05: HOST ONLINE and JOIN ONLINE (menus 1600 and 1610), in the main menu while no network game is on.
+// Both restart into the network game (netlobby.c, D3); the lobby is the page's overlay (browser) or the startup
+// window and the console (desktop).
+static char joincode[8];        // the room code being typed (menu 1610)
+static int joinerr;             // the code typed was not a room code
+
 void menus(void)
 {
     CACHE1D_FIND_REC *dir;
@@ -1732,7 +1740,12 @@ cheat_for_port_credits:
             rotatesprite(c<<16,28<<16,65536L,0,INGAMEDUKETHREEDEE,0,0,10,0,0,xdim-1,ydim-1);
             if (PLUTOPAK)   // JBF 20030804
                 rotatesprite((c+100)<<16,36<<16,65536L,0,PLUTOPAKSPRITE+2,(sintable[(totalclock<<4)&2047]>>11),0,2+8,0,0,xdim-1,ydim-1);
-            x = probekeys(c,67,16,6, (int[]){ sc_N, sc_O, sc_L, sc_H, sc_C, sc_Q, 0 });
+            // Brief 05: HOST ONLINE and JOIN ONLINE after QUIT, while no network game is on and the data allows one (D14)
+            m = (ud.multimode < 2 && NetOnlineAvailable());
+            if (m)
+                x = probekeys(c,67,16,8, (int[]){ sc_N, sc_O, sc_L, sc_H, sc_C, sc_Q, sc_G, sc_J, 0 });
+            else
+                x = probekeys(c,67,16,6, (int[]){ sc_N, sc_O, sc_L, sc_H, sc_C, sc_Q, 0 });
             if(x >= 0)
             {
                 if( ud.multimode > 1 && x == 0 && ud.recstat != 2)
@@ -1761,6 +1774,13 @@ cheat_for_port_credits:
                         case 3: KB_FlushKeyboardQueue();cmenu(400);break;
                         case 4: cmenu(990);break;
                         case 5: cmenu(500);break;
+                        case 6: cmenu(1600);break;
+                        case 7:
+                            joincode[0] = 0; joinerr = 0;
+                            inputloc = 0;
+                            KB_FlushKeyboardQueue();
+                            cmenu(1610);
+                            break;
                     }
                 }
             }
@@ -1796,6 +1816,11 @@ cheat_for_port_credits:
             menutext(c,67+16+16+16+16,SHX(-6),PHX(-6),"CREDITS");
 
             menutext(c,67+16+16+16+16+16,SHX(-7),PHX(-7),"QUIT");
+            if (m)
+            {
+                menutext(c,67+16+16+16+16+16+16,SHX(-8),PHX(-8),"HOST ONLINE");
+                menutext(c,67+16+16+16+16+16+16+16,SHX(-9),PHX(-9),"JOIN ONLINE");
+            }
             break;
 
         case 50:
@@ -1886,6 +1911,67 @@ if (!VOLUMEALL) {
                 menutext(c,67+16+16+16+16+16   ,SHX(-7),1,"QUIT TO TITLE");
             else menutext(c,67+16+16+16+16+16   ,SHX(-7),PHX(-7),"QUIT TO TITLE");
             menutext(c,67+16+16+16+16+16+16,SHX(-8),PHX(-8),"QUIT GAME");
+            break;
+
+        case 1600:      // HOST ONLINE (brief 05): how many players
+            rotatesprite(160<<16,19<<16,65536L,0,MENUBAR,16,0,10,0,0,xdim-1,ydim-1);
+            menutext(160,24,0,0,"HOST ONLINE");
+            {
+                int keys[8], n = NetHostMax() - 1;      // 2 players up to the most the data allows
+                for (i = 0; i < n; i++) keys[i] = sc_2 + i;
+                keys[n] = 0;
+                x = probekeys(160,60,16,n,keys);
+                for (i = 0; i < n; i++)
+                {
+                    sprintf(buf,"%d PLAYERS",i+2);
+                    menutext(160,60+16*i,SHX(-2-i),PHX(-2-i),buf);
+                }
+            }
+            gametext(160,174,"OTHERS JOIN WITH THE ROOM CODE OR THE",0,2+8+16);
+            gametext(160,183,"LOBBY'S INVITE LINK. THE HOST MAY START EARLY.",0,2+8+16);
+            if (x >= 0)
+            {
+                // (natively it does not return when it works; in the browser the page reloads into the lobby)
+                if (!NetRestart(x+2,NULL))
+                    OSD_ShowDisplay(1);     // say why where it can be read: the console has the message
+                cmenu(0);
+            }
+            else if (x == -1)
+                cmenu(0);
+            break;
+
+        case 1610:      // JOIN ONLINE (brief 05): type the room code
+            rotatesprite(160<<16,19<<16,65536L,0,MENUBAR,16,0,10,0,0,xdim-1,ydim-1);
+            menutext(160,24,0,0,"JOIN ONLINE");
+            gametext(160,70,"TYPE THE ROOM CODE AND PRESS ENTER",0,2+8+16);
+            gametext(160,79,"(6 LETTERS AND DIGITS, FROM THE HOST)",0,2+8+16);
+            x = strget((320>>1),96,joincode,6,STRGET_NOCONTROLLER);
+            if (x == -1)
+            {
+                joincode[0] = 0;
+                cmenu(0);
+            }
+            else if (x == 1)
+            {
+                char code[8];
+
+                if (NetIsRoomCode(joincode,code))
+                {
+                    if (!NetRestart(0,code))
+                        OSD_ShowDisplay(1);
+                    cmenu(0);
+                }
+                else
+                {
+                    joinerr = 1;
+                    KB_FlushKeyboardQueue();
+                }
+            }
+            if (joinerr)
+            {
+                gametext(160,124,"THAT IS NOT A ROOM CODE:",0,2+8+16);
+                gametext(160,133,"6 LETTERS AND DIGITS, NO 0, 1, I OR O",0,2+8+16);
+            }
             break;
 
         case 100:

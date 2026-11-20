@@ -92,6 +92,7 @@ GAMEOBJS=$(SRC)/game.$o \
 	$(SRC)/grpscan.$o \
 	$(SRC)/sounds.$o \
 	$(SRC)/netgame.$o \
+	$(SRC)/netlobby.$o \
 	$(SRC)/testhooks.$o
 
 GAMEOBJS+= \

@@ -32,14 +32,19 @@ int NetGameAllowed(void)
     return !NetDataIsShareware() || AllowSharewareNet || AllowSharewareNetCmd;
 }
 
-void NetRefuseShareware(void)
+const char *NetSharewareGateText(void)
 {
-    static const char *why =
+    return
         "Network games are switched off for the shareware version of Duke Nukem 3D.\n"
         "Its licence does not allow online multiplayer services, so shareware network games\n"
         "are meant for a local network only. If you are on one, allow them with\n"
         "AllowSharewareNetGames = 1 under [Comm Setup] in duke3d.cfg, or start the game with\n"
         "-allowsharewarenet. The registered version has no such limit.";
+}
+
+void NetRefuseShareware(void)
+{
+    const char *why = NetSharewareGateText();
 
     buildprintf("Network game refused: %s\n", why);
     uninitmultiplayers();

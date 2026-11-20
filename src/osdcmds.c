@@ -2,6 +2,8 @@
 #include "osdcmds.h"
 #include "osd.h"
 #include "crc32.h"
+#include "netlobby.h"
+#include "netgame.h"
 
 #include <ctype.h>
 
@@ -340,6 +342,52 @@ static int osdcmd_spawn(const osdfuncparm_t *parm)
     return OSDCMD_OK;
 }
 
+// Brief 05: host and join a network game through the relay (netlobby.c). Both restart into the
+// network game (D3): the browser reloads its page, the desktop game re-launches itself. They refuse
+// (with the shareware gate's reason) when the data is shareware and network games are not allowed (D14).
+static int osdcmd_host(const osdfuncparm_t *parm)
+{
+    int n = NetHostMax();
+
+    if (parm->numparms > 1) return OSDCMD_SHOWHELP;
+    if (parm->numparms == 1) {
+        char *end;
+        n = (int)strtol(parm->parms[0], &end, 10);
+        if (*end || n < 2) {
+            buildprintf("host: the number of players is 2 to %d, not \"%s\".\n", NetHostMax(), parm->parms[0]);
+            return OSDCMD_OK;
+        }
+    }
+    NetRestart(n, NULL);
+    return OSDCMD_OK;
+}
+
+static int osdcmd_join(const osdfuncparm_t *parm)
+{
+    if (parm->numparms != 1) return OSDCMD_SHOWHELP;
+    NetRestart(0, parm->parms[0]);
+    return OSDCMD_OK;
+}
+
+#ifndef __EMSCRIPTEN__
+static int osdcmd_relay(const osdfuncparm_t *parm)
+{
+    if (parm->numparms > 1) return OSDCMD_SHOWHELP;
+    if (parm->numparms == 1) {
+        if (strlen(parm->parms[0]) >= sizeof(NetRelay) || strstr(parm->parms[0], "://")) {
+            buildprintf("relay: give the relay's UDP address as HOST:PORT, for example relay.example.org:7777.\n");
+            return OSDCMD_OK;
+        }
+        strcpy(NetRelay, parm->parms[0]);
+    }
+    if (NetRelay[0])
+        buildprintf("relay: host and join use %s (kept in duke3d.cfg).\n", NetRelay);
+    else
+        buildprintf("relay: none is set; set one with  relay HOST:PORT\n");
+    return OSDCMD_OK;
+}
+#endif
+
 static int osdcmd_vars(const osdfuncparm_t *parm)
 {
     int showval = (parm->numparms < 1);
@@ -411,6 +459,12 @@ if (VOLUMEONE) {
     
     OSD_RegisterFunction("fileinfo","fileinfo <file>: gets a file's information", osdcmd_fileinfo);
     OSD_RegisterFunction("quit","quit: exits the game immediately", osdcmd_quit);
+
+    OSD_RegisterFunction("host","host [players]: host a network game through the relay (restarts into its lobby; the most players the data allows if not given)", osdcmd_host);
+    OSD_RegisterFunction("join","join <code>: join the network game with that room code (restarts into it)", osdcmd_join);
+#ifndef __EMSCRIPTEN__
+    OSD_RegisterFunction("relay","relay [HOST:PORT]: show or set the relay that host and join use", osdcmd_relay);
+#endif
 
     OSD_RegisterFunction("myname","myname: change your multiplayer nickname", osdcmd_vars);
     OSD_RegisterFunction("showfps","showfps: show the frame rate counter", osdcmd_vars);

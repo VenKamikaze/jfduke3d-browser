@@ -1,20 +1,21 @@
 duke3d_h=$(SRC)/duke3d.h $(ENGINEINC)/build.h $(ENGINEINC)/compat.h $(ENGINEINC)/cache1d.h $(ENGINEINC)/pragmas.h $(ENGINEINC)/mmulti.h $(ENGINEINC)/baselayer.h $(MACTROOT)/types.h $(MACTROOT)/file_lib.h $(MACTROOT)/util_lib.h $(MACTROOT)/keyboard.h $(MACTROOT)/control.h $(SRC)/develop.h $(SRC)/gamedefs.h $(SRC)/function.h $(SRC)/config.h $(SRC)/sounds.h $(SRC)/rts.h $(SRC)/_rts.h $(SRC)/soundefs.h $(AUDIOLIBROOT)/include/fx_man.h $(AUDIOLIBROOT)/include/music.h $(SRC)/names.h $(SRC)/funct.h $(SRC)/version.h
 
-$(SRC)/game.$o: $(SRC)/game.c $(MACTROOT)/scriplib.h $(duke3d_h) $(ENGINEINC)/osd.h $(SRC)/osdfuncs.h $(SRC)/osdcmds.h $(SRC)/grpscan.h $(SRC)/startwin.h $(SRC)/netgame.h $(SRC)/testhooks.h $(ENGINEINC)/mmulti_vnet.h
+$(SRC)/game.$o: $(SRC)/game.c $(MACTROOT)/scriplib.h $(duke3d_h) $(ENGINEINC)/osd.h $(SRC)/osdfuncs.h $(SRC)/osdcmds.h $(SRC)/grpscan.h $(SRC)/startwin.h $(SRC)/netgame.h $(SRC)/netlobby.h $(SRC)/testhooks.h $(ENGINEINC)/mmulti_vnet.h
 $(SRC)/actors.$o: $(SRC)/actors.c $(duke3d_h)
 $(SRC)/gamedef.$o: $(SRC)/gamedef.c $(duke3d_h)
 $(SRC)/global.$o: $(SRC)/global.c $(duke3d_h)
-$(SRC)/menues.$o: $(SRC)/menues.c $(duke3d_h) $(MACTROOT)/mouse.h $(MACTROOT)/animlib.h $(ENGINEINC)/osd.h
+$(SRC)/menues.$o: $(SRC)/menues.c $(duke3d_h) $(MACTROOT)/mouse.h $(MACTROOT)/animlib.h $(ENGINEINC)/osd.h $(SRC)/netlobby.h $(SRC)/netgame.h
 $(SRC)/player.$o: $(SRC)/player.c $(duke3d_h)
 $(SRC)/premap.$o: $(SRC)/premap.c $(duke3d_h) $(SRC)/netgame.h
 $(SRC)/sector.$o: $(SRC)/sector.c $(duke3d_h)
 $(SRC)/sounds.$o: $(SRC)/sounds.c $(duke3d_h)
 $(SRC)/rts.$o: $(SRC)/rts.c $(duke3d_h)
-$(SRC)/config.$o: $(SRC)/config.c $(duke3d_h) $(MACTROOT)/scriplib.h $(SRC)/_functio.h $(ENGINEINC)/osd.h
+$(SRC)/config.$o: $(SRC)/config.c $(duke3d_h) $(MACTROOT)/scriplib.h $(SRC)/_functio.h $(ENGINEINC)/osd.h $(SRC)/netlobby.h
 $(SRC)/osdfuncs.$o: $(SRC)/osdfuncs.c $(duke3d_h)
 $(SRC)/netgame.$o: $(SRC)/netgame.c $(duke3d_h) $(SRC)/netgame.h $(SRC)/testhooks.h $(ENGINEINC)/mmulti_vnet.h
+$(SRC)/netlobby.$o: $(SRC)/netlobby.c $(SRC)/netlobby.h $(duke3d_h) $(SRC)/netgame.h $(SRC)/startwin.h $(ENGINEINC)/mmulti_vnet.h $(ENGINEINC)/osd.h
 $(SRC)/testhooks.$o: $(SRC)/testhooks.c $(duke3d_h) $(SRC)/testhooks.h $(SRC)/netgame.h
-$(SRC)/osdcmds.$o: $(SRC)/osdcmds.c $(SRC)/osdcmds.h $(ENGINEINC)/osd.h $(duke3d_h) $(ENGINEINC)/crc32.h
+$(SRC)/osdcmds.$o: $(SRC)/osdcmds.c $(SRC)/osdcmds.h $(ENGINEINC)/osd.h $(duke3d_h) $(ENGINEINC)/crc32.h $(SRC)/netlobby.h
 
 $(SRC)/astub.$o: $(SRC)/astub.c $(ENGINEINC)/build.h $(ENGINEINC)/compat.h $(ENGINEINC)/editor.h $(ENGINEINC)/pragmas.h $(ENGINEINC)/baselayer.h $(ENGINEINC)/cache1d.h $(SRC)/names.h
 

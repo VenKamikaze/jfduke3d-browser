@@ -4,6 +4,7 @@
 #include "duke3d.h"
 #include "testhooks.h"
 #include "netgame.h"
+#include "osd.h"
 #include "mmulti_vnet.h"
 #ifndef _WIN32
 #include <time.h>
@@ -468,6 +469,8 @@ static void TestDumpTic(int tic)
 static int TestExitDone;
 static int TestStallTic, TestStallMs, TestStallDone;
 static int TestLateTic, TestLateMs, TestLateDone;      // -testlate<T>,<ms> (brief 04)
+static int TestOsdTic, TestOsdDone;                    // -testosd<T>,<command> (brief 05)
+static char TestOsdCmd[128];
 static int TestSaveTic, TestSaveDone;                  // -testsave<T> (brief 04 fix round)
 
 void TestExitArg(int tic)  { TestExitTic = tic; }
@@ -524,6 +527,16 @@ void TestLateArg(const char *arg)
 
     TestLateTic = atoi(arg);
     TestLateMs = c ? atoi(c + 1) : 1000;
+}
+
+// -testosd<T>,<command>: at game tic T of the first level this machine runs the console command (for
+// example "host 2" or "quit"), as if typed into the console. Per machine, nothing on the wire.
+void TestOsdArg(const char *arg)
+{
+    const char *c = strchr(arg, ',');
+
+    TestOsdTic = atoi(arg);
+    Bsnprintf(TestOsdCmd, sizeof(TestOsdCmd), "%s", c ? c + 1 : "");
 }
 
 void TestInputHook(void)
@@ -1307,6 +1320,11 @@ void TestTicHook(void)
     if (TestStallTic > 0 && !TestStallDone && TestLevelNo <= 1 && tic == TestStallTic) {
         TestStallDone = 1;
         TestStall();
+    }
+    if (TestOsdTic > 0 && !TestOsdDone && TestLevelNo <= 1 && tic == TestOsdTic) {
+        TestOsdDone = 1;
+        buildprintf("TEST: console command at tic %d: %s\n", tic, TestOsdCmd);
+        OSD_Dispatch(TestOsdCmd);
     }
 
     if (TestNudgeTic >= 0 && tic == TestNudgeTic) {
