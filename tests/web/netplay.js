@@ -1655,7 +1655,7 @@ SCENARIOS['host-join'] = {
         await h.start();
         const code = await waitRoomCode(h, 60000);
         const out = await h.out();
-        check(new RegExp('Re-launching: \\S+ -allowsharewarenet -net -relay ' + relay.udp.replace(/\./g, '\\.') + ' -host-room 2 --').test(out), h.name + ' re-launched itself with -net -relay <its setting> -host-room 2', (out.match(/Re-launching:[^\n]*/) || [''])[0]);
+        check(new RegExp('Re-launching: \\S+ -allowsharewarenet -nosetup -net -relay ' + relay.udp.replace(/\./g, '\\.') + ' -host-room 2 --').test(out), h.name + ' re-launched itself with -net -relay <its setting> -host-room 2', (out.match(/Re-launching:[^\n]*/) || [''])[0]);
         const g = await netPage('p1', '&join=' + code, play);
         await g.start();
         await finish([h, g], 'native console host');
@@ -1668,7 +1668,7 @@ SCENARIOS['host-join'] = {
         const code = await waitRoomCode(h);
         const g = nativeMachine('p1', play.concat(['-testosd60,join ' + code.toLowerCase()]), { dump: 'd.bin', cfg });
         await g.start();
-        check(!!(await outHas(g, new RegExp('Re-launching: \\S+ -allowsharewarenet -net -relay ' + relay.udp.replace(/\./g, '\\.') + ' -room ' + code + ' --'), 60000)), g.name + ' re-launched itself with -room ' + code);
+        check(!!(await outHas(g, new RegExp('Re-launching: \\S+ -allowsharewarenet -nosetup -net -relay ' + relay.udp.replace(/\./g, '\\.') + ' -room ' + code + ' --'), 60000)), g.name + ' re-launched itself with -room ' + code);
         await finish([h, g], 'native console join');
       }
       // 4. the menus. No -v/-l: the game shows the title menu (menu 0), where HOST ONLINE (G) and JOIN ONLINE (J) are. -testmenu says

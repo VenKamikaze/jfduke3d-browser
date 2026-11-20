@@ -1115,6 +1115,7 @@ static int menuwasopen = 0;
 // window and the console (desktop).
 static char joincode[8];        // the room code being typed (menu 1610)
 static int joinerr;             // the code typed was not a room code
+static int joinerrlen;          // how long the code was then: the message goes at the next edit
 
 void menus(void)
 {
@@ -1964,9 +1965,12 @@ if (!VOLUMEALL) {
                 else
                 {
                     joinerr = 1;
+                    joinerrlen = (int)strlen(joincode);
                     KB_FlushKeyboardQueue();
                 }
             }
+            if (joinerr && (int)strlen(joincode) != joinerrlen)
+                joinerr = 0;        // the player is correcting the code
             if (joinerr)
             {
                 gametext(160,124,"THAT IS NOT A ROOM CODE:",0,2+8+16);

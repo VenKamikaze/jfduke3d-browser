@@ -221,9 +221,9 @@ $(RSRC)/%.$o: $(RSRC)/%.c
 $(SRC)/%.$(res): $(SRC)/%.rc
 	$(RC) -i $< -o $@ --include-dir=$(SRC) --include-dir=$(ENGINEINC)
 
-$(RSRC)/%_gresource.c: $(RSRC)/%.gresource.xml
+$(RSRC)/%_gresource.c: $(RSRC)/%.gresource.xml $(RSRC)/%.glade
 	glib-compile-resources --generate-source --manual-register --c-name=startgtk --target=$@ --sourcedir=$(RSRC) $<
-$(RSRC)/%_gresource.h: $(RSRC)/%.gresource.xml
+$(RSRC)/%_gresource.h: $(RSRC)/%.gresource.xml $(RSRC)/%.glade
 	glib-compile-resources --generate-header --manual-register --c-name=startgtk --target=$@ --sourcedir=$(RSRC) $<
 
 $(RSRC)/%_bmp.c: $(RSRC)/%.bmp | $(ENGINEROOT)/bin2c$(EXESUFFIX)
@@ -285,7 +285,8 @@ test-mmulti: engine-current
 # player without sound plays the same game (--nosound); brief 05: a vanished host or guest ends the others' game
 # with a message (test-gone.sh), a newcomer at a departed player's relay address is refused (test-rejoin.sh), a hidden
 # tab leaves the deathmatch totals table (test-hidden-bonus.sh), the GTK startup window hosts and joins online
-# (test-startwin.sh: needs xvfb-run, else NOT RUN)
+# (test-startwin.sh: needs xvfb-run, else NOT RUN); the re-launch of host and join brings no startup window back
+# (test-relaunch-setup.sh: Xvfb and xdotool, else NOT RUN)
 test-net: engine-current
 	for i in $$(seq $(GAME_RUNS)); do tests/net/test-three-games.sh --relay || exit 1; done
 	tests/net/test-three-games.sh --relay --players 2
@@ -314,6 +315,7 @@ test-net: engine-current
 	tests/net/test-gone.sh
 	tests/net/test-rejoin.sh
 	tests/net/test-hidden-bonus.sh
+	@tests/net/test-relaunch-setup.sh; st=$$?; if [ $$st -eq 3 ]; then echo '*** test-relaunch-setup.sh: NOT RUN (not counted as passed; see its message above)'; elif [ $$st -ne 0 ]; then exit $$st; fi
 	@tests/net/test-startwin.sh; st=$$?; if [ $$st -eq 3 ]; then echo '*** test-startwin.sh: NOT RUN (not counted as passed; see its message above)'; elif [ $$st -ne 0 ]; then exit $$st; fi
 
 test: test-scripts test-mmulti test-net

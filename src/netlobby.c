@@ -351,6 +351,10 @@ int NetRestart(int players, const char *code)
     // -allowsharewarenet is not written to the configuration file: carry it over, before -net
     if (AllowSharewareNetCmd)
         relaunchargv[relaunchargc++] = "-allowsharewarenet";
+    // The startup window must not come up again: ForceSetup defaults to 1, so a default install opens it unless
+    // told not to, and it would sit on a useless window after the room is made (the window's online choices are
+    // ignored when -net is given). Once, before -net; a -setup or -nosetup of the old arguments is dropped below.
+    relaunchargv[relaunchargc++] = "-nosetup";
     relaunchargv[relaunchargc++] = "-net";
     relaunchargv[relaunchargc++] = "-relay";
     relaunchargv[relaunchargc++] = NetRelay;
@@ -375,6 +379,7 @@ int NetRestart(int players, const char *code)
             continue;
             }
         if (!Bstrcasecmp(savedargv[i], "-allowsharewarenet")) continue;      // already first
+        if (!Bstrcasecmp(savedargv[i], "-nosetup") || !Bstrcasecmp(savedargv[i], "-setup")) continue;   // -nosetup is already first
         relaunchargv[relaunchargc++] = savedargv[i];
         }
     relaunchargv[relaunchargc] = NULL;
@@ -429,7 +434,21 @@ void NetRelaunch(void)
 # if defined(__linux__)
     {
     ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-    if (n > 0) { exe[n] = 0; path = exe; }
+    if (n > 0)
+        {
+        static const char gone[] = " (deleted)";
+        size_t l;
+        exe[n] = 0;
+        l = strlen(exe);
+        // the file was replaced while the game ran (a new build, an upgrade): the kernel appends this; the new file is
+        // at the same path
+        if (l > sizeof(gone) - 1 && !strcmp(exe + l - (sizeof(gone) - 1), gone))
+            {
+            exe[l - (sizeof(gone) - 1)] = 0;
+            buildputs("The game's file was replaced while it ran: starting the file at the same path.\n");
+            }
+        path = exe;
+        }
     }
 # else
     (void)exe;
