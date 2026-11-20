@@ -156,7 +156,13 @@ Status: **review** (branch `browser/05-host-and-join` in jfduke3d-browser, from 
 | `tests/net/test-hidden-bonus.sh` | 21 | two hidden natives through a dukematch level end, relay and UDP: both leave the table by themselves, 500 equal records |
 | `tests/net/test-shareware-gate.sh` | 41 | the old cases and the console's `host` and `join` refused with the licence reason, nothing re-launched |
 
-@@REGRESSION@@
+**Regression** (final code, rebuilt native and wasm from clean libraries after the mutation runs)
+
+- `make test GAME_RUNS=1`: **exit 0, 26 PASS** (the 22 of 04b and the four new native tests: gone, rejoin, hidden-bonus, startwin; 870 `ok` lines, no NOT RUN), 25 minutes. It includes `test-udp-unchanged.sh` (plain UDP against the pre-brief-01 build, unchanged), `test-three-games.sh` (relay and UDP, `-f2`, `-f4`), `test-level-exit.sh`, `test-save.sh`, `test-errors.sh`, `test-relay-lost.sh`, `test-shareware-gate.sh` and `krand-order.py`.
+- `make test-web` (it stopped at `netplay.js`'s failure, so `determinism.js` and `frametime.js` were run by hand afterwards): `grptable.js` 12/0, `data.js` 193/0, `con.js` 17/0, `smoke.js` 36/0, `persist.js` 18/0, `focus.js` 24/0, `menu-keys.js` 23/0, `loops.js` 18/0, **`netplay.js` (every scenario: 04's, 04b's and the eight new ones; 55 minutes) 1,602 passed, 5 failed: all five in `lag-highlat`'s 400 ms case with a browser slave**, **`determinism.js` strict 22 passed, 0 failed**, `frametime.js` 3 passed, **1 failed: the known "no stall over 100 ms" check** (max 191 ms, p99 108 ms, load 3.6).
+- **`lag-highlat` is not caused by this brief.** It is marginal in this container today (the original game's 256 byte datagram limit, bugs.md D20): three more runs of the 05 build gave 19/9, 26/4 and 19/9 (the slave ends at tic 318 to 340 of 350), and **three runs of the 04b build (`/home/user/wt-d04b`, no 05 code) gave 19/9, 19/9 and 25/5**, the slave there hanging until the time limit (125 s). The 05 build ends such a slave after 15 s with "the host left the game", which is `NetGoneCheck()` turning a hang into a message. 04b's Outcome had it passing (32 checks) under a lighter load.
+
+
 
 **Mutations** (each applied, built, run, reverted; the fork's `mmulti.c` ones are scratch changes, never committed; `/home/user/d05-variants/mutate.sh` and `runmut.sh`, logs `mut-*.log` and `mut2-*.log`). A first run of the fork mutations was invalid and was redone: the top-level `make` reuses an existing `jfbuild/libengine*.a` (bugs.md L9), so the mutated `mmulti.c` was not built in, and the tests find the guest to kill by the process name `duke3d`, which a variant binary named otherwise does not have; the variants now sit in `NAME/duke3d` and the engine libraries are removed before each fork build and before the restore. The three game-side mutations that the browser tests needed were built together (`web3`: the `userack()` change off, `NetGoneCheck()` off, the gate not asked) because the tests that bite on them are independent: `level-end` only reacts to the first, the gone cases and `gate-menu` to the others.
 
@@ -215,19 +221,14 @@ sed -i "s|relay: ''|relay: 'ws://127.0.0.1:7778/vnet'|; s|allowSharewareNetGames
 
 ## State
 
-**20 Nov 2026: implemented and tested; the mutation runs and the full regression are being run (see the checklist).** Worktree `/home/user/wt-d05` (branch `browser/05-host-and-join`, from `origin/claude` `2eb459f`; kept). Logs and scratch (not in git): `/home/user/d05-logs/` (test logs, `mut-*.log` the mutation runs), `/home/user/d05-variants/` (mutated builds, `mutate.sh`, `runmut.sh`). Build: native `make -j4`, wasm `EMSDK_DIR=~/.cache/jfsw-browser/emsdk scripts/build-wasm.sh` (rebuild both after any change; the mutation script rebuilds both at its end); the test GRP is copied from `/home/user/wt-d04b/testdata/`.
+**20 Nov 2026: finished, status review.** Everything in the Outcome is done and pushed (`browser/05-host-and-join`). Worktree `/home/user/wt-d05` (kept). Logs and scratch (not in git): `/home/user/d05-logs/`, `/home/user/d05-variants/` (mutated builds, `mutate.sh`, `runmut.sh`, `regress.sh`).
 
-Remaining work, in order (tick as done):
+- [x] 0 to 5. The brief, the page, the game, `NetGoneCheck()` and the hidden `userack()`, the native tests, the `netplay.js` scenarios.
+- [x] 5b. Mutations: all ten run and listed in the Outcome (the first run of the fork mutations was invalid and was redone, see there).
+- [x] 6. Regression: `make test GAME_RUNS=1` exit 0 (26 PASS); `make test-web` and `determinism.js` strict 22/0; `netplay.js` 1,602/5 (`lag-highlat`, equally failing on the 04b build); `frametime.js`'s known stall check.
+- [x] 7. Docs: Outcome, `code-facts.md` section 22, `building.md` section 9, `bugs.md` D21 to D23 (and L18, D8), the README row (review) and D14 text.
+- [x] 8. Report.
 
-- [x] 0. This brief, committed and pushed.
-- [x] 1. Page (A, B): `web/jfduke3d.js`, `index.html`, `jfduke3d.css`, `config.js`.
-- [x] 2. Game (C, D): `src/netlobby.c`/`.h`, `Startup()`, `app_main`, `gameexit()`, `config.c`, Makefiles, `osdcmds.c` (CRLF), `menues.c` (CRLF), the startup window, `run-headless.sh`, `-testosd`.
-- [x] 3. E and F: `NetGoneCheck()`, the host's quit message, `userack()`.
-- [x] 4. Native tests: `test-startwin.sh`, `test-rejoin.sh`, `test-gone.sh`, `test-hidden-bonus.sh`, the gate cases of `test-shareware-gate.sh`.
-- [x] 5. Browser tests: `netplay.js` `lobby`, `start-now`, `host-join`, `lobby-errors`, `level-end`, `rejoin-vanish`, `rejoin-quit`, `compaction`: all pass.
-- [ ] 5b. Mutations (`/home/user/d05-variants/runmut.sh`, logs `mut-*.log`): hidden-bonus without the `userack()` change, gone without `NetGoneCheck()`, the gate not asked, rejoin without session ids, rejoin with the gib owner hashed, the overlay count, Start now without the count, level-end without the `userack()` change, lobby-errors with `NetGoneCheck()` and the gate off.
-- [ ] 6. Regression: `make test GAME_RUNS=1`, `netplay.js` (all), `make test-web` (with strict `determinism.js`).
-- [ ] 7. Docs: the results in the Outcome, the README row ("review": done).
-- [ ] 8. Report.
+**To do (the coordinator):** review; merge `--no-ff` into `claude` (no fork change); update `PROMPT.md` section 0.
 
-**Open problems:** none new. Known and reported: `frametime.js`'s 100 ms stall check; bugs.md D20, D22, D23.
+**Open problems:** none new. Known and reported: `frametime.js`'s 100 ms stall check; `lag-highlat` marginal at 400 to 500 ms (D20); D22 (a master left alone); D23 (the order screens).
