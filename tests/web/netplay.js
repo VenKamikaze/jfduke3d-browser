@@ -456,7 +456,7 @@ async function room(relay, kinds, o) {
     const net = (kind) => (kind === 'browser'
       ? ['-relay', relay.ws].concat(i === 0 ? ['-host-room', String(kinds.length)] : ['-room', code])
       : ['-relay', relay.udp].concat(i === 0 ? ['-host-room', String(kinds.length)] : ['-room', code]));
-    const args = gameArgs({ net: net(kinds[i]), tics, dump: 'd.bin', nudge: o.nudge && o.nudge[i], level: o.level, state: o.state, lag: o.lag ? 'l.bin' : '', extra: o.extra ? o.extra(i) : [] });
+    const args = gameArgs({ net: net(kinds[i]), tics, dump: 'd.bin', nudge: o.nudge && o.nudge[i], level: o.level, state: o.state, lag: o.lag ? 'l.bin' : '', testsync: o.testsync, extra: o.extra ? o.extra(i) : [] });
     const impair = o.impair ? o.impair(i) : null;
     let m;
     if (kinds[i] === 'browser') {
@@ -488,7 +488,7 @@ async function bounded(name, kinds, o, expectTransport) {
     const limit = (o && o.tics ? o.tics : TICS) / NOMINAL * 1000 * 3 + 90000;
     for (const m of ms) { await m.waitEnd(limit - (now() - ms[0].started)); }
     console.log('  the game took ' + ((now() - ms[0].started) / 1000).toFixed(1) + ' s from the start of the host to the end of the last machine (' + ((o && o.tics) || TICS) + ' tics)');
-    await checkGame(ms, (o && o.tics) || TICS);
+    await checkGame(ms, (o && o.tics) || TICS, { noSyncCount: !!(o && o.noSyncCount) });
     if (o && o.impair) {
       for (const m of ms) { if (m.kind === 'browser') { check(/test knobs in use:.*impair/.test(await m.out()), m.name + ' reports that the impairment knob is in use'); } }
     }
@@ -1335,12 +1335,28 @@ SCENARIOS.newgame = {
 // more reliable packet per tic, which with the packets in flight filled mmulti's 256 byte datagram, so the newest tics were held
 // back until older ones were acknowledged; the slave's lag correction fell further and further behind and its game ended before
 // the master's last tics reached it. (The same limit exists in the original game, 350 tics later: mmulti.c MAXPAKSIZ.)
+// Reshaped in the 05 fix round (it used to pass by luck, 1 run in 8, on the 04b and the 05 build alike): the host quits at -testquit350 and
+// leaves a lagging slave behind, which ended at 316 to 343 of 350. Measured on a quiet machine under flock, current code:
+//   natives, 500 ms, -testsync  (the old case)  2 of 5 complete (the slave ended at 335 to 340 in 3)
+//   natives, 500 ms, no -testsync               5 of 5 (its packets are smaller, so mmulti's 256 byte datagram fills later)
+//   native + browser, 400 ms (the old case)     0 of 4 (316 to 344: a browser slave, driven by frames, lags more)
+//   native + browser, 300 ms                    5 of 5
+//   both cases together (the shape below)       6 of 6
+// With the nudge fix removed (each tick that forwarded a tic also sends 127): natives 500 ms ended at 285 to 287 with -testsync (3 of 3),
+// 307 without (2 of 2), and in the shape below at 293, 294 and 306 (3 of 3); the browser case failed in 2 of those 3 too.
+// The cases: [machines of the pair, ms of latency on the slave's datagrams, tics, -testsync]. NETPLAY_HIGHLAT="nn:500:350:0,nb:300:350:0"
+// replaces them (n native, b browser; for measuring a case's reliability: 05 fix round).
+const HIGHLAT_CASES = 'nn:500:350:0,nb:300:350:0';
 SCENARIOS['lag-highlat'] = {
-  what: '500 ms on the slave\'s datagrams: 350 tics, both machines play them all and agree',
+  what: '500 ms (natives) and 300 ms (a browser slave) on the slave\'s datagrams, 350 tics, no -testsync: both machines play them all and agree',
   run: async () => {
     const lat = (n) => (i) => (i > 0 ? 'lat=' + n + ',seed=' + (321 + i) : null);
-    await bounded('lat500', ['native', 'native'], { tics: 350, impair: lat(500), extra: () => ['-testfire1'] });     // (the players fire and walk about: their inputs change every few tics, so the packets are bigger)
-    await bounded('lat400-browser', ['native', 'browser'], { tics: 350, impair: lat(400), extra: () => ['-testfire1'] });
+    for (const c of (process.env.NETPLAY_HIGHLAT || HIGHLAT_CASES).split(',')) {
+      const [k, ms, tics, sync] = c.split(':');
+      const kinds = k.split('').map((x) => (x === 'n' ? 'native' : 'browser'));
+      // (the players fire and walk about: their inputs change every few tics, so the packets are bigger)
+      await bounded('lat' + ms + '-' + kinds.join('+'), kinds, { tics: +tics, impair: lat(+ms), extra: () => ['-testfire1'], testsync: sync === '1', noSyncCount: sync !== '1' });
+    }
   },
 };
 

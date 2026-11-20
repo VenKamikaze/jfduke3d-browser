@@ -240,6 +240,10 @@ The review found no blocker and two should-fix items; both are fixed on this bra
 - Quick `lag-matrix` rerun of the final build (one run; load 2.6 to 5.5): median input to tic, master / slave: natives 33.8 / 33.9 (before 33.7 / 67), natives with 30 ms 33.7 / 67.1 (before 52 / 122), two browsers 103 / 104 (before 85 / 136), browser host + native 107 / 134 (before 105 / 161), native host + browser 134 / 108 (before 84 / 150); forwarding wait 0.0 ms in all five, packet wait 0.0 to 0.1 ms, datagrams 49 to 60 a second. The step 3 gains hold (natives with 30 ms: the slave 67 again; the browser figures are inside the run-to-run noise as before).
 - Not run again: `make test-web`'s other steps (`grptable`, `data`, `con`, `smoke`, `persist`, `focus`, `menu-keys`, `loops`, `frametime`): the round changed no page, no wasm-only code and no data code (the wasm build was rebuilt and `netplay.js` and `determinism.js` ran against it).
 
+### Corrected in 05
+
+The fix round's claim that `lag-highlat` passes with the fixed build (32 checks) and fails without the fix was **luck in the 400 ms browser-slave case**: on a quiet machine, 8 alternating runs each, the 04b and the 05 builds both completed 1 time in 8. The host quits at `-testquit350` while a lagging slave is still at tic 316 to 343 (the original game's datagram limit, D20, with `-testsync`'s larger packets and a frame-driven slave), so `make test-web` was red on both. The nudge fix itself is real: without it the 500 ms natives case ends at about 285 to 307 of 350 every time. Brief 05's fix round reshaped the scenario (no `-testsync`; natives 500 ms plus a browser slave at 300 ms) and measured it (6 of 6 on the current code, 3 of 3 failing without the fix): see its Outcome. The figures above stand as written for the history; the scenario's pass/fail claim does not.
+
 ## State
 
 **Fix round finished 19 Nov 2026, status review** (Outcome and "Fix round" above). Worktree `/home/user/wt-d04b` (branch `browser/04b-lag-cuts`; kept). Variant builds and logs: `/home/user/d04b-variants/`, `/home/user/d04b-logs/` (not in git).
