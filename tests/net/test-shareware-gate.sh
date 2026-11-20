@@ -16,6 +16,9 @@
 #             (printing the room code / "Waiting for players..."), and two players play 100 tics
 #             over UDP together;
 #  cfg        "AllowSharewareNetGames = 1" under [Comm Setup] in duke3d.cfg: the same, with no argument;
+#  console    (brief 05) the console's host and join ask the gate too: a single player game on shareware data with no
+#             option and a relay in duke3d.cfg types "host 2" (-testosd) and "join ABC234": the console says the licence reason, nothing
+#             is re-launched and the game plays on to its end; with -allowsharewarenet "host 2" re-launches the game;
 #  registered a copy of the GRP, named duke3d.grp (the default name, since the game cannot identify it), that grpscan.c does not know and that has no DUKESW.BIN (made by
 #             modgrp.py: the game takes it for registered data): network games start with no option.
 set -uo pipefail
@@ -73,6 +76,15 @@ t_note "both a registered-looking GRP and the shareware GRP present: the game lo
 mkdir -p "$t_tmp/both"; ln -sf "$root/testdata/duke3dshare.grp" "$t_tmp/both/duke3dshare.grp"
 "$root/tests/net/modgrp.py" registered "$root/testdata/duke3dshare.grp" "$t_tmp/both/duke3d.grp" >/dev/null || t_bad "modgrp.py failed"
 refused both-udp --grp none -- -net -nm:2 "-p$uport" -- -v1 -l1 -c2
+
+t_note "the console's host and join ask the gate (brief 05)"
+mkdir -p "$t_tmp/con"; printf '[Comm Setup]\nRelay = "127.0.0.1:%s"\n' "$rport" > "$t_tmp/con/duke3d.cfg"
+t_game con-host "$t_tmp/con" --game "$game" --timeout 60 -- -v1 -l1 -testosd40,host\ 2 -testquit120
+t_wait_pid "$game_pid" 70
+t_check "console host: refused with the licence reason, no re-launch, the game played on (exit $t_status)" bash -c "[ $t_status -eq 0 ] && grep -q 'console command at tic 40: host 2' '$t_tmp/con/duke3d.log' && grep -q 'Network games are switched off for the shareware version' '$t_tmp/con/duke3d.log' && ! grep -q 'Re-launching' '$t_tmp/con-host.out' && grep -q '^TEST: quitting after 120 game tics' '$t_tmp/con/duke3d.log'"
+t_game con-join "$t_tmp/con" --game "$game" --timeout 60 -- -v1 -l1 -testosd40,join\ abc234 -testquit120
+t_wait_pid "$game_pid" 70
+t_check "console join: refused the same way (exit $t_status)" bash -c "[ $t_status -eq 0 ] && grep -q 'Network games are switched off for the shareware version' '$t_tmp/con/duke3d.log' && ! grep -q 'Re-launching' '$t_tmp/con-join.out'"
 
 t_note "single player is not affected"
 t_game single "$t_tmp/single" --game "$game" --timeout 60 -- -v1 -l1 -testquit60

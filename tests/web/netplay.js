@@ -1677,16 +1677,6 @@ SCENARIOS['host-join'] = {
       {
         console.log('  browser menu host + browser menu join, the game started from the menu (' + LOAD() + ')');
         const mplay = testArgs({ tics: LOBBY_TICS, dump: 'd.bin', level: false, extra: ['-testmenu'] });
-        const menuIs = async (m, n, ms) => waitFor(async () => { const l = (await m.out()).split('\n').filter((x) => /^TEST: menu /.test(x)); return l.length && +l[l.length - 1].slice(11) === n; }, ms || 60000);
-        // skip the logo screens with a letter key until the title menu is up
-        const toTitleMenu = async (m) => {
-          const t0 = now();
-          while (now() - t0 < 90000) {
-            if (await menuIs(m, 0, 700)) { return true; }
-            await key(m.page, 'KeyA', 100);
-          }
-          return false;
-        };
         const h = await netPage('p0', '', mplay);
         await h.start();
         check(await toTitleMenu(h), h.name + ': the title menu is up');
@@ -1722,6 +1712,17 @@ SCENARIOS['host-join'] = {
       }
     } finally { await cleanup(relay); }
   },
+};
+
+// -testmenu says which menu is up ("TEST: menu N", also in the title menu: playback()). The logo screens are skipped with a letter key.
+const menuIs = async (m, n, ms) => waitFor(async () => { const l = (await m.out()).split('\n').filter((x) => /^TEST: menu /.test(x)); return l.length && +l[l.length - 1].slice(11) === n; }, ms || 60000);
+const toTitleMenu = async (m) => {
+  const t0 = now();
+  while (now() - t0 < 90000) {
+    if (await menuIs(m, 0, 700)) { return true; }
+    await key(m.page, 'KeyA', 100);
+  }
+  return false;
 };
 
 // Every way a network game can fail or end (brief 05, section E) says why, and leaves the player somewhere sensible. Those of
@@ -1813,6 +1814,21 @@ SCENARIOS['lobby-errors'] = {
       CONFIG_RELAY = relay.ws; CONFIG_ALLOW = false;
       await pageRefusal('gate-host', '?host=2', /switched off for the shareware version/, { ready: ['error'] });
       await pageRefusal('gate-join', '?join=ABC234', /switched off for the shareware version/, { ready: ['error'] });
+      // and in the game: the title menu has no HOST ONLINE (hot key G), the console's host says why and the page does not move
+      {
+        const m = await browserMachine('gate-menu', [], { raw: '?test=1&persist=0&args=' + encodeURIComponent('-testmenu') });
+        await m.start();
+        check(await toTitleMenu(m), 'gate-menu: the title menu is up');
+        await key(m.page, 'g'); await sleep(300); await key(m.page, 'Enter'); await sleep(800);
+        check(!(await menuIs(m, 1600, 1500)), 'gate-menu: with the shareware gate closed the title menu has no HOST ONLINE (G and Enter do not open menu 1600)');
+        await key(m.page, 'j'); await sleep(300); await key(m.page, 'Enter'); await sleep(800);
+        check(!(await menuIs(m, 1610, 1500)), 'gate-menu: nor JOIN ONLINE (menu 1610)');
+        await key(m.page, 'NumLock'); await sleep(400);
+        await m.page.keyboard.type('host 2', { delay: 40 }); await m.page.keyboard.press('Enter'); await sleep(1000);
+        check(/Network games are switched off for the shareware version/.test(await m.out()), 'gate-menu: the console\'s host says the shareware gate is closed');
+        check(!/[?&]host=/.test(m.page.url()), 'gate-menu: and the page did not reload into a network game (' + m.page.url() + ')');
+        await m.stop(); machines.splice(machines.indexOf(m), 1);
+      }
       await closeEnv();
       // test mode needs testMode: true in config.js: on a site that leaves it false, ?test=1 in a link does nothing
       CONFIG_TEST = false;

@@ -133,7 +133,12 @@ int NetHostMax(void)
 
 int NetOnlineAvailable(void)
 {
-    return NetGameAllowed() && numplayers < 2 && !mmulti_vnet_active() && ud.recstat != 2;
+    static int allowed = -1;
+
+    // (the menu asks every frame; the data and the settings do not change while the game runs, and the answer for
+    // registered data is a file lookup)
+    if (allowed < 0) allowed = NetGameAllowed();
+    return allowed && numplayers < 2 && !mmulti_vnet_active() && ud.recstat != 2;
 }
 
 // ---- The start-up wait ------------------------------------------------------------------------
