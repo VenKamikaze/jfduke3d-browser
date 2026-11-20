@@ -39,7 +39,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # include <emscripten.h>
 #elif defined(_WIN32)
 # include <process.h>
-# include <direct.h>
 #else
 # include <poll.h>
 # include <unistd.h>
@@ -57,16 +56,12 @@ static int savedargc;
 static char const * const *savedargv;
 #ifndef __EMSCRIPTEN__
 static char savedexe[BMAX_PATH+1];     // argv[0] made absolute before the game changes directory
-static char savedcwd[BMAX_PATH+1];     // the directory the game was started in (it changes into ~/.jfduke3d)
 #endif
 
 void NetSetArgs(int argc, char const * const argv[])
 {
     savedargc = argc;
     savedargv = argv;
-#ifndef __EMSCRIPTEN__
-    if (!getcwd(savedcwd, sizeof(savedcwd))) savedcwd[0] = 0;
-#endif
 #if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
     // app_main changes into ~/.jfduke3d early on, so a relative argv[0] ("./duke3d") would name
     // the wrong file by the time of a re-launch. Linux uses /proc/self/exe anyway (NetRelaunch).
@@ -440,9 +435,6 @@ void NetRelaunch(void)
     (void)exe;
 # endif
     uninitsystem();
-    // back to the directory the game was started in: its relative arguments (-g, -d, -j ...) name files there
-    if (savedcwd[0] && chdir(savedcwd) < 0)
-        buildprintf("warning: could not change back to %s\n", savedcwd);
 # ifdef _WIN32
     {
     // _execv joins the arguments into one command line without quoting them (an argument with a

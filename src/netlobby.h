@@ -19,7 +19,7 @@ extern char NetRelay[128];
 #define NET_HOSTMAX_REGISTERED 8
 #define NET_HOSTMAX_SHAREWARE  4
 
-// app_main, first thing (before it changes directory): the command line and the directory, for a re-launch.
+// app_main, first thing (before it changes directory): the command line, for a re-launch.
 void NetSetArgs(int argc, char const * const argv[]);
 // app_main, once the log is open: a re-launched game says so in its new log.
 void NetLogRelaunch(void);
