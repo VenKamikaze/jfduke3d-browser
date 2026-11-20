@@ -26,11 +26,20 @@
 //        the game with -allowsharewarenet. Set it only for a deployment that is a LAN (a private network of
 //        people who each have the right to play the shareware version, say a party or a classroom), and
 //        never for a public site. It is taken only from this file, never from the page address: a link
-//        cannot switch it on. The browser plays network games since brief 04 (the tests start them with ?test=1&args=; the
-//        host and join pages come with brief 05); the game data the player
+//        cannot switch it on. The browser plays network games since brief 04 (the tests start them with ?test=1&args=) and hosts
+//        and joins them from the page since brief 05 (below); the game data the player
 //        picks with "Use your own copy" can be registered data, which always allows them (decision D14).
 //
-// relay: the vnet relay for network games (brief 05). Empty (the default). Not used yet: the page starts no network game.
+// relay: the vnet relay for network games, as its WebSocket URL ('wss://relay.example.org/vnet', or
+//        'ws://127.0.0.1:PORT/vnet' for a local one). Empty (the default): none configured, and the page says
+//        so when someone tries to host or join.
+//        It is used by ?host=N and ?join=CODE in the page address, by the lobby's invite links (?join=CODE on this
+//        page), and by the game's console (host, join) and menus (HOST ONLINE, JOIN ONLINE), which reload the page
+//        with those parameters. The page builds the game's `-net -relay URL -host-room N | -room CODE` from it. It is
+//        taken only from this file, never from the address (a crafted link must not send visitors through another
+//        relay). WebTransport is tried first and derived from a wss:// URL; a ws:// URL uses WebSocket only.
+//        The relay's -origins must name this page's host:port exactly (doco/browser/building.md).
+//        With the shareware game data the network gate (allowSharewareNetGames, above) applies to these too.
 //
 // testMode: false (the default, and what a public site must keep). true lets a page address with ?test=1
 //        use the test hooks and test-only parameters (?args=, ?files=, ?persist=, ...; see the top of jfduke3d.js).
