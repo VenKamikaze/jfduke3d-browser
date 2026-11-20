@@ -282,7 +282,10 @@ test-mmulti: engine-current
 # machines that draw, over security cameras and a mirror (test-nodraw.sh, brief 04); F4 opens the sound menu and Escape
 # leaves it (test-menu-f4.sh, D3: needs Xvfb, xdotool, ImageMagick and PIL; exit 3 is "NOT RUN", reported
 # and not counted as a failure); the prediction never changes the simulation (test-predict-pure.sh); a
-# player without sound plays the same game (--nosound)
+# player without sound plays the same game (--nosound); brief 05: a vanished host or guest ends the others' game
+# with a message (test-gone.sh), a newcomer at a departed player's relay address is refused (test-rejoin.sh), a hidden
+# tab leaves the deathmatch totals table (test-hidden-bonus.sh), the GTK startup window hosts and joins online
+# (test-startwin.sh: needs xvfb-run, else NOT RUN)
 test-net: engine-current
 	for i in $$(seq $(GAME_RUNS)); do tests/net/test-three-games.sh --relay || exit 1; done
 	tests/net/test-three-games.sh --relay --players 2
@@ -306,5 +309,11 @@ test-net: engine-current
 	tests/net/test-errors.sh
 	tests/net/test-relay-lost.sh
 	tests/net/test-shareware-gate.sh
+	@# 05: a vanished host or guest ends the others' game with a message, a newcomer at a departed player's address is refused,
+	@# a hidden tab leaves the deathmatch totals table, and the GTK startup window's online host and join (under xvfb-run)
+	tests/net/test-gone.sh
+	tests/net/test-rejoin.sh
+	tests/net/test-hidden-bonus.sh
+	@tests/net/test-startwin.sh; st=$$?; if [ $$st -eq 3 ]; then echo '*** test-startwin.sh: NOT RUN (not counted as passed; see its message above)'; elif [ $$st -ne 0 ]; then exit $$st; fi
 
 test: test-scripts test-mmulti test-net

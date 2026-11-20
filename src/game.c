@@ -8589,6 +8589,7 @@ int playback(void)
         setgamepalette(&ps[myconnectindex], palette, 1);    // JBF 20040308
         drawbackground();
         menus();
+        TestMenuPoll();         // test-only: -testmenu (the title menu is not drawn by displayrest())
         //ps[myconnectindex].palette = palette;
         nextpage();
         fadepal(0,0,0, 63,0,-7);
@@ -8682,6 +8683,7 @@ int playback(void)
         else
         {
             menus();
+            TestMenuPoll();     // test-only: -testmenu
             if( ud.multimode > 1 )
             {
                 ControlInfo noshareinfo;

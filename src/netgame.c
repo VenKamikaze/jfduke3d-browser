@@ -117,7 +117,10 @@ int NetHiddenTab(void)
 #ifdef __EMSCRIPTEN__
     if (jfbuild_browser_hidden_netgame()) return 1;
 #endif
-    return TestNoDrawOn && numplayers > 1;
+    // (playerswhenstarted: a game that began as a network game and has lost the others since still draws nothing, as the
+    // browser's hidden tab does while its relay session lasts; brief 05: the quit message of a master that left shows
+    // order screens on shareware data, which a hidden tab skips)
+    return TestNoDrawOn && (numplayers > 1 || playerswhenstarted > 1);
 }
 
 // One pass of the game loop of a hidden browser tab in a network game, called by app_main's loop
